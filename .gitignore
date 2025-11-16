@@ -1,3 +1,8 @@
+.notes/
+.build/
+**/.notes/
+**/.build/
+
 # Prerequisites
 *.d
 

@@ -1,4 +1,15 @@
 @echo off
 
-nasm -fwin32 main.s -o "./.build/main.obj"
-golink /entry _main "./.build/main.obj" user32.dll kernel32.dll
+set "i=%1"
+
+if "%i%"=="000" set d=000-template & goto :run
+echo sub-project not found
+goto :end
+
+:run
+pushd %d%
+if not exist ".build" mkdir ".build"
+call "./build.bat"
+popd
+
+:end

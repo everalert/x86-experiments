@@ -24,26 +24,34 @@ extern _LoadIconA@8			; user32.dll, NOTE: apparently superseded by LoadImageA
 extern _LoadCursorA@8		; user32.dll, NOTE: apparently superseded by LoadImageA
 extern _RegisterClassA@4	; user32.dll, NOTE: apparently superseded by RegisterClassEx
 
-; %1  error message ptr
+; %1  error message string
 %macro ShowErrorMessage 1
     push	MB_OK|MB_ICONEXCLAMATION
-    push	dword str_error
-    push	dword %1
-    push	dword [HINSTANCE]
+    push	str_error
+    push	%1
+    push	[HINSTANCE]
     call	_MessageBoxA@16
 	jmp		exit
 %endmacro
 
-; %1  str len
-; %2  str ptr
+; %1  string len
+; %2  string
 %macro WriteConsole 2
-	push	0						; lpVoidReserved
+	push	eax
+	push	ecx
+	mov		ecx, %1
+	push	ebx
+	mov		ebx, %2
+	push	NULL					; lpVoidReserved
 	push	StdOutCharsWritten		; lpNumberOfCharsWritten
-	push	%1						; nNumberOfCharsToWrite
-	push	%2						; lpBuffer
+	push	ecx						; nNumberOfCharsToWrite
+	push	ebx						; lpBuffer
 	push	[HSTDOUT]				; hConsoleOutput
 	call	_WriteConsoleA@20
-	cmp		eax, 0					; NULL
+	cmp		eax, NULL
+	pop		ebx
+	pop		ecx
+	pop		eax
 	jnz		%%success
 	ShowErrorMessage str_err_write_console
 	%%success:
@@ -53,6 +61,7 @@ global _main
 
 section .data
 	; win32 constants
+	NULL						equ 0
 	ATTACH_PARENT_PROCESS		equ -1
 	INVALID_VALUE_HANDLE		equ -1
 	STD_OUTPUT_HANDLE			equ -11
@@ -69,6 +78,7 @@ section .data
     WindowName					db "CreateWindowEx test",0
 	WndClassName				db "TestWndClass",0
 	WndClassExSz				dd 0x30
+	str_newline					db 10,0
 	str_error					db "Error!",0
 	str_wnd_reg_failed			db "Window Registration Failed!",0
 	str_wnd_create_failed		db "Window Creation Failed!",0
@@ -78,8 +88,17 @@ section .data
 	str_err_get_console_window	db "GetConsoleWindow Failed!",0
 	str_err_write_console		db "WriteConsoleA Failed!",0
 	str_console_test			db "Console Output Test",10,0
-	str_console_test_len		dd 20
-	str_newline					db 10,0
+	strlen_console_test			dd $-str_console_test
+	str_get_hinst				db "Getting HINSTANCE",10,0
+	strlen_get_hinst			dd $-str_get_hinst
+	str_init_wnd_class			db "Initializing Window Class",10,0
+	strlen_init_wnd_class		dd $-str_init_wnd_class
+	str_reg_wnd_class			db "Registering Window Class",10,0
+	strlen_reg_wnd_class		dd $-str_reg_wnd_class
+	str_create_window			db "Creating Window",10,0
+	strlen_create_window		dd $-str_create_window
+	str_show_window				db "Showing Window",10,0
+	strlen_show_window			dd $-str_show_window
 
 section .bss
 	HINSTANCE:					resd 1
@@ -93,6 +112,8 @@ section .bss
 section .text
 
 _main:
+
+; console init
 
 console_setup:
 	push	ATTACH_PARENT_PROCESS
@@ -109,18 +130,54 @@ console_get_handle:
 	ShowErrorMessage str_err_get_std_handle
 console_setup_done:
 
-console_test_write:
-	WriteConsole [str_console_test_len], str_console_test
+;console_test_write:
+;	WriteConsole [strlen_console_test], str_console_test
+
+; testing hex to alpha
+; 0x00112233 -> '0','0','1','1','2','2','3','3'
+test_htoa:
+	sub		esp, 12		; [8]u8		output buffer
+						; u32		input value
+	lea		eax, [esp+4]	; *output buffer
+	lea		ebx, [esp+0]	; *input value
+	mov		dword [ebx], 0x0123ABCD
+conv_htoa:
+	push	edx
+	push	ecx
+	mov		ecx, 8			; (i) input position
+conv_htoa_loop:
+	sub		ecx, 1
+	mov		edx, [ebx]		; input value
+	and		edx, 0xF
+	add		edx, 0x30		; dl += '0' 
+	cmp		edx, 0x39
+	jle		conv_htoa_loop_output	; char < A
+	add		edx, 0x07
+conv_htoa_loop_output:
+	mov		byte [eax+ecx], dl
+	shr		dword [ebx], 4
+	cmp		ecx, 0
+	jge		conv_htoa_loop
+	pop		ecx
+	pop		edx
+test_htoa_output:
+	WriteConsole 8, eax
+	WriteConsole 1, str_newline
+	add		esp, 12
+	jmp exit
+
+; window init
 
 get_hinstance:
-	; get hinstance
-	push	0						; NULL
+	WriteConsole [strlen_get_hinst], str_get_hinst
+	push	NULL						; lpModuleName
 	call	_GetModuleHandleA@4
+	mov		[HINSTANCE], eax
 	cmp		eax, 0
 	jz		wnd_hinst_error
-	mov		[HINSTANCE], eax
 
 initialize_window_class:
+	WriteConsole [str_init_wnd_class], strlen_init_wnd_class
 	;mov		ebx, WndClassEx
 	mov		ebx, [WndClassExSz]
 	mov		dword [WndClassEx+0x00], ebx					; cbSize
@@ -143,12 +200,16 @@ initialize_window_class:
 	mov		dword [WndClassEx+0x28], WndClassName			; lpszClassName
 
 register_window_class:
+	WriteConsole [str_reg_wnd_class], strlen_reg_wnd_class
 	push	WndClassEx
 	call	_RegisterClassA@4
 	cmp		eax, 0
 	jz		wnd_reg_error
 
+; showing window
+
 create_window:
+	WriteConsole [str_create_window], strlen_create_window
 	push	0						; lpParam 
 	push 	[HINSTANCE]
 	push 	0						; hMenu
@@ -167,6 +228,7 @@ create_window:
 	mov		[HWND], eax
 
 show_window:
+	WriteConsole [str_show_window], strlen_show_window
 	push	1		; WS_SHOWNORMAL
 	push	[HWND]
 	call	_ShowWindow@8
@@ -188,6 +250,8 @@ msg_loop:
 	push	WindowMessage
 	call	_DispatchMessageA@4
 	jmp		msg_loop
+
+; end program
 	
 done:
 	mov		ebx, [WindowMessage]

@@ -130,41 +130,64 @@ console_get_handle:
 	ShowErrorMessage str_err_get_std_handle
 console_setup_done:
 
-;console_test_write:
-;	WriteConsole [strlen_console_test], str_console_test
-
 ; testing hex to alpha
 ; 0x00112233 -> '0','0','1','1','2','2','3','3'
 test_htoa:
-	sub		esp, 12		; [8]u8		output buffer
-						; u32		input value
-	lea		eax, [esp+4]	; *output buffer
-	lea		ebx, [esp+0]	; *input value
-	mov		dword [ebx], 0x0123ABCD
-conv_htoa:
-	push	edx
-	push	ecx
-	mov		ecx, 8			; (i) input position
-conv_htoa_loop:
-	sub		ecx, 1
-	mov		edx, [ebx]		; input value
-	and		edx, 0xF
-	add		edx, 0x30		; dl += '0' 
-	cmp		edx, 0x39
-	jle		conv_htoa_loop_output	; char < A
-	add		edx, 0x07
-conv_htoa_loop_output:
-	mov		byte [eax+ecx], dl
-	shr		dword [ebx], 4
-	cmp		ecx, 0
-	jge		conv_htoa_loop
-	pop		ecx
-	pop		edx
-test_htoa_output:
+	sub		esp, 8		; [8]u8		output buffer
+	lea		eax, [esp]
+	push	eax
+	push	dword 0x01234567
+	call	htoa
 	WriteConsole 8, eax
 	WriteConsole 1, str_newline
-	add		esp, 12
-	jmp exit
+	push	eax
+	push	dword 0x0123ABCD
+	call	htoa
+	WriteConsole 8, eax
+	WriteConsole 1, str_newline
+	push	eax
+	push	dword 0xDEADBEEF
+	call	htoa
+	WriteConsole 8, eax
+	WriteConsole 1, str_newline
+	add		esp, 8
+	jmp		exit
+
+; convert 4-byte u32 value to hex string
+; fn htoa(val: u32, out: *[8]u8) callconv(.stdcall) void
+htoa:
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
+	push	ecx
+	push	edx
+	mov		ebx, [ebp+8]			; val
+	mov		eax, [ebp+12]			; out
+	mov		ecx, 8					; ecx = i
+htoa_it:
+	sub		ecx, 1
+	mov		edx, ebx				; val
+	and		edx, 0xF
+	add		edx, 0x30				; edx += '0' 
+	cmp		edx, 0x39
+	jle		htoa_it_out				; char < A
+	add		edx, 0x07				; edx += 'A'-':'
+htoa_it_out:
+	mov		byte [eax+ecx], dl		; out[i]
+	shr		ebx, 4					; val >> 4
+	cmp		ecx, 0
+	jge		htoa_it
+conv_htoa_end:
+	pop		edx
+	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
+	; NOTE: not sure why the following crashes
+	;  add esp, 8
+	;  ret
+	ret		8
 
 ; window init
 

@@ -5,6 +5,7 @@ set "i=%1"
 if "%i%"=="000" set d=000-template & goto :run
 if "%i%"=="001" set d=001-console & goto :run
 if "%i%"=="002" set d=002-window & goto :run
+if "%i%"=="003" set d=003-drawing & goto :run
 echo sub-project not found
 goto :end
 

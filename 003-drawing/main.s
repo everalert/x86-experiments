@@ -21,8 +21,6 @@ extern _SetLastError@4		; kernel32.dll
 extern _FormatMessageA@28	; kernel32.dll
 extern _MessageBoxA@16		; user32.dll
 extern _CreateWindowExA@48	; user32.dll
-extern _ShowWindow@8		; user32.dll
-extern _UpdateWindow@4		; user32.dll
 extern _DestroyWindow@4		; user32.dll
 extern _GetMessageA@16		; user32.dll
 extern _TranslateMessage@4	; user32.dll
@@ -37,6 +35,7 @@ extern _BeginPaint@8		; user32.dll
 extern _EndPaint@8			; user32.dll
 extern _GetDC@4				; user32.dll
 extern _ReleaseDC@8			; user32.dll
+extern _GetClientRect@8		; user32.dll
 extern _StretchDIBits@52	; gdi32.dll
 
 
@@ -65,6 +64,35 @@ struc PAINTSTRUCT
 	.rgbReserved				resb 32
 endstruc
 
+struc WNDCLASSEXA
+	.cbSize						resd 1
+	.style						resd 1
+	.lpfnWndProc				resd 1
+	.cbClsExtra					resd 1
+	.cbWndExtra					resd 1
+	.hInstance					resd 1
+	.hIcon						resd 1
+	.hCursor					resd 1
+	.hbrBackground				resd 1
+	.lpszMenuName				resd 1
+	.lpszClassName				resd 1
+	.hIconSm					resd 1
+endstruc
+
+struc BITMAPINFOHEADER
+	.biSize						resd 1
+	.biWidth					resd 1
+	.biHeight					resd 1
+	.biPlanes					resw 1
+	.biBitCount					resw 1
+	.biCompression				resd 1
+	.biSizeImage				resd 1
+	.biXPelsPerMeter			resd 1
+	.biYPelsPerMeter			resd 1
+	.biClrUsed					resd 1
+	.biClrImportant				resd 1
+endstruc
+
 
 section .data
 
@@ -87,6 +115,7 @@ section .data
 	CS_VREDRAW						equ	0x0001
 	CS_HREDRAW						equ	0x0002
 	WS_SHOWNORMAL					equ 1
+	WS_VISIBLE						equ 0x10000000
 	WS_OVERLAPPEDWINDOW				equ 0x00CF0000
 	WS_EX_CLIENTEDGE				equ 0x00000200
 	MB_OK							equ 0x00
@@ -109,16 +138,16 @@ section .data
 	FORMAT_MESSAGE_FROM_STRING		equ 0x00000400
 	FORMAT_MESSAGE_FROM_SYSTEM		equ 0x00001000
 	ERROR_ACCESS_DENIED				equ 0x00000005
+	GDI_ERROR						equ	0xFFFFFFFF
 
 	; our stuff
     str_window_name					db "TestWindow",0
 	str_wndclass_name				db "TestWndClass",0
-	wndclass_sz						dd 0x30
 	str_newline						db 10,0
 	str_error						db "Error!",0
 	str_errmsg_format				db "[ERROR] (00000000) ",0		; will be filled in and expanded by fn
-	strlen_errmsg_format			dd $-str_errmsg_format-1
-	strloc_errmsg_format_err		dd 9							; position of the start of the error code
+	strlen_errmsg_format			equ $-str_errmsg_format-1
+	strloc_errmsg_format_err		equ 9							; position of the start of the error code
 	str_RegisterClassExA			db "RegisterClassExA",0
 	str_CreateWindowExA				db "CreateWindowExA",0
 	str_GetModuleHandleA			db "GetModuleHandleA",0
@@ -129,6 +158,9 @@ section .data
 	str_VirtualAlloc				db "VirtualAlloc",0
 	str_VirtualFree					db "VirtualFree",0
 	str_AdjustWindowRect			db "AdjustWindowRect",0
+	str_GetDC						db "GetDC",0
+	str_ReleaseDC					db "ReleaseDC",0
+	str_StretchDIBits				db "StretchDIBits",0
 	str_get_hinst					db "Getting HINSTANCE",10,0
 	strlen_get_hinst				equ $-str_get_hinst
 	str_init_wndclass				db "Initializing Window Class",10,0
@@ -160,7 +192,7 @@ section .bss
 	WindowHandle:				resd 1
 	WindowMessage:				resd 1
 	DeviceContextHandle:		resd 1
-	WndClassEx:					resb 0x30
+	WindowClass:				resb WNDCLASSEXA_size
 
 	BackBuffer					resb ScreenBuffer_size
  
@@ -184,10 +216,10 @@ get_hinstance:
 	call	_GetModuleHandleA@4
 	mov		[ModuleHandle], eax
 	cmp		eax, 0
-	jnz		get_hinst_success
+	jnz		.success
     push	str_GetModuleHandleA
 	call	show_error_and_exit
-get_hinst_success:
+.success:
 	push	eax							; print HINSTANCE
 	call	print_u32
 
@@ -199,13 +231,13 @@ initialize_window_class:
 	push	ebx
 	push	ecx
 	mov		ecx, [ModuleHandle]
-	mov		ebx, [wndclass_sz]
-	mov		dword [WndClassEx+0x00], ebx					; cbSize
-	mov		dword [WndClassEx+0x04], CS_HREDRAW|CS_VREDRAW	; style
-	mov		dword [WndClassEx+0x08], wndproc				; lpfnWndProc
-	mov		dword [WndClassEx+0x0C], 0						; cbClsExtra
-	mov		dword [WndClassEx+0x10], 0						; cbWndExtra
-	mov		dword [WndClassEx+0x14], ecx					; hInstance
+	mov		ebx, WNDCLASSEXA_size
+	mov		dword [WindowClass+WNDCLASSEXA.cbSize], ebx
+	mov		dword [WindowClass+WNDCLASSEXA.style], CS_HREDRAW|CS_VREDRAW
+	mov		dword [WindowClass+WNDCLASSEXA.lpfnWndProc], wndproc
+	mov		dword [WindowClass+WNDCLASSEXA.cbClsExtra], 0
+	mov		dword [WindowClass+WNDCLASSEXA.cbWndExtra], 0
+	mov		dword [WindowClass+WNDCLASSEXA.hInstance], ecx
 	push	LR_DEFAULTSIZE									; fuLoad
 	push	0												; cy
 	push	0												; cx
@@ -215,8 +247,8 @@ initialize_window_class:
     call	_LoadImageA@24
 	push	eax												; print LoadImageA(Icon) result
 	call	print_u32
-	mov		dword [WndClassEx+0x18], eax					; hIcon
-	mov		dword [WndClassEx+0x2C], eax					; hIconSm
+	mov		dword [WindowClass+WNDCLASSEXA.hIcon], eax
+	mov		dword [WindowClass+WNDCLASSEXA.hIconSm], eax
 	push	LR_DEFAULTSIZE									; fuLoad
 	push	0												; cy
 	push	0												; cx
@@ -226,10 +258,10 @@ initialize_window_class:
     call	_LoadImageA@24
 	push	eax												; print LoadImageA(Cursor) result
 	call	print_u32
-	mov		dword [WndClassEx+0x1C], eax					; hCursor
-	mov		dword [WndClassEx+0x20], COLOR_WINDOWFRAME
-	mov		dword [WndClassEx+0x24], 0						; lpszMenuName
-	mov		dword [WndClassEx+0x28], str_wndclass_name		; lpszClassName
+	mov		dword [WindowClass+WNDCLASSEXA.hCursor], eax
+	mov		dword [WindowClass+WNDCLASSEXA.hbrBackground], COLOR_WINDOWFRAME
+	mov		dword [WindowClass+WNDCLASSEXA.lpszMenuName], 0
+	mov		dword [WindowClass+WNDCLASSEXA.lpszClassName], str_wndclass_name
 	pop		ecx
 	pop		ebx
 	pop		eax
@@ -238,15 +270,15 @@ register_wndclass:
 	push	strlen_reg_wndclass
 	push	str_reg_wndclass
 	call	print
-	push	WndClassEx
+	push	WindowClass
 	call	_RegisterClassExA@4
 	push	eax												; print result
 	call	print_u32
 	cmp		eax, 0
-	jnz		register_wndclass_success
+	jnz		.success
     push	str_RegisterClassExA
 	call	show_error_and_exit
-register_wndclass_success:
+.success:
 
 ; showing window
 
@@ -267,10 +299,10 @@ create_window:
 	push	ebx							;  lpRect,
 	call	_AdjustWindowRect@12
 	cmp		eax, 0
-	jnz		create_window_adjust_rect_success
+	jnz		.adjust_rect_success
     push	str_AdjustWindowRect
 	call	show_error_and_exit
-create_window_adjust_rect_success:
+.adjust_rect_success:
 	push	0							; lpParam 
 	push 	[ModuleHandle]
 	push 	0							; hMenu
@@ -283,7 +315,7 @@ create_window_adjust_rect_success:
 	push 	ecx							; nWidth
 	push 	CW_USEDEFAULT				; Y
 	push 	CW_USEDEFAULT				; X
-	push 	WS_OVERLAPPEDWINDOW
+	push 	WS_OVERLAPPEDWINDOW|WS_VISIBLE
 	push 	str_window_name
 	push 	str_wndclass_name
 	push 	WS_EX_CLIENTEDGE
@@ -291,26 +323,14 @@ create_window_adjust_rect_success:
 	push	eax							; print HWND
 	call	print_u32
 	cmp		eax, 0
-	jnz		create_window_success
+	jnz		.success
     push	str_CreateWindowExA
 	call	show_error_and_exit
-create_window_success:
+.success:
 	add		esp, RECT_size
 	pop		ecx
 	pop		ebx
 	mov		[WindowHandle], eax
-
-show_window:
-	push	strlen_show_window
-	push	str_show_window
-	call	print
-	push	WS_SHOWNORMAL
-	push	[WindowHandle]
-	call	_ShowWindow@8
-
-update_window:
-	push	[WindowHandle]
-	call	_UpdateWindow@4
 
 msg_loop:
 	push	0
@@ -320,7 +340,7 @@ msg_loop:
 	call	_GetMessageA@16				; switch to PeekMessage (non-blocking) and timed outer loop
 	cmp		eax, 0
 	; TODO: also handle -1 (error) case before processing messages; see GetMessage
-	; on MSDN for details
+	; on MSDN for details (not applicable to PeekMessage)
 	jng		done					
 	push	WindowMessage
 	call	_TranslateMessage@4
@@ -352,15 +372,45 @@ wndproc:
 	push	edx
 	mov		ebx, [ebp+12]				; msg
 	; handle messages
-wndproc_wm_paint:
 	cmp		ebx, WM_PAINT
-	jnz		wndproc_wm_size
+	jz		.wm_paint
+	;cmp		ebx, WM_SIZE
+	;jz		.wm_size
+	;cmp		ebx, WM_EXITSIZEMOVE
+	;jz		.wm_exitsizemove
+	cmp		ebx, WM_CLOSE
+	jz		.wm_close
+	cmp		ebx, WM_DESTROY
+	jz		.wm_destroy
+	;cmp		ebx, WM_ACTIVATEAPP
+	;jz		.wm_activateapp
+	jmp		.default
+.wm_paint:
 	push	strlen_WM_PAINT
 	push	str_WM_PAINT
 	call	print
-	; write a pixel to test
-	mov		eax, [BackBuffer+ScreenBuffer.Memory]
-	mov		dword [eax+1024*4], 0xFF000000			; FIXME: can't see this pixel after drawing!!!
+	; update size
+	sub		esp, RECT_size
+	mov		eax, esp
+	push	eax
+	push	[WindowHandle]
+	call	_GetClientRect@8
+	mov		eax, esp
+	push	dword [eax+RECT.Bt]
+	push	dword [eax+RECT.Rt]
+	push	BackBuffer
+	call	set_screen_size
+	add		esp, RECT_size
+	; a lil draw testing
+	; TODO: maybe floodfill black by default in set_screen_size to clear screen?
+	mov		eax, 0x101010						; bg col (0xRRGGBB)
+	mov		ebx, 0xFF0000						; shape col
+	push	eax
+	call	pixel_flood			
+	push	ebx
+	push	100
+	push	100
+	call	pixel_write
 	; (re)draw
 	sub		esp, PAINTSTRUCT_size
 	mov		edx, esp
@@ -371,6 +421,11 @@ wndproc_wm_paint:
 	; getdc
 	push	[WindowHandle]
 	call	_GetDC@4	
+	cmp		eax, 0
+	jnz		.wm_paint_getdc_ok
+	push	str_GetDC
+	call	show_error_and_exit
+.wm_paint_getdc_ok:
 	mov		[DeviceContextHandle], eax
 	mov		edx, esp
 	; stretchdibits
@@ -383,76 +438,66 @@ wndproc_wm_paint:
   	push	[BackBuffer+ScreenBuffer.Width]		; SrcWidth
   	push	0									; ySrc
 	push	0									; xSrc
-  	push	[edx+PAINTSTRUCT.rcPaint+RECT.Bt]	; DestHeight
-  	push	[edx+PAINTSTRUCT.rcPaint+RECT.Rt]	; DestWidth
+  	mov		eax, dword [edx+PAINTSTRUCT.rcPaint+RECT.Bt]	; DestHeight
+	sub		eax, dword [edx+PAINTSTRUCT.rcPaint+RECT.Tp]
+	push	eax
+  	mov		eax, dword [edx+PAINTSTRUCT.rcPaint+RECT.Rt]	; DestWidth
+	sub		eax, dword [edx+PAINTSTRUCT.rcPaint+RECT.Lf]
+	push	eax
   	push	[edx+PAINTSTRUCT.rcPaint+RECT.Tp]	; yDest
   	push	[edx+PAINTSTRUCT.rcPaint+RECT.Lf]	; xDest
 	push	[DeviceContextHandle]				; hdc
 	call	_StretchDIBits@52
+	cmp		eax, 0								; FIXME: prevent 0 width or height, causes this to be 0
+												; TODO: check for GDI_ERROR 
+	jg		.wm_paint_stretchdibits_ok
+	push	str_StretchDIBits
+	call	show_error_and_exit					; FIXME: simply crashes without showing the dialog?
+.wm_paint_stretchdibits_ok:
 	; releasedc
 	push	[DeviceContextHandle]
 	push	[WindowHandle]
 	call	_ReleaseDC@8
+	cmp		eax, 0
+	jnz		.wm_paint_releasedc_ok
+	push	str_ReleaseDC
+	call	show_error_and_exit
+.wm_paint_releasedc_ok:
 	; endpaint
 	mov		edx, esp
 	push	edx
 	push	[WindowHandle]
 	call	_EndPaint@8
-	; validaterect (old)
-	;push	0
-	;push	[WindowHandle]
-	;call	_ValidateRect@8				; just to prevent spam, use BeginPaint/EndPaint if actually handling
 	add		esp, PAINTSTRUCT_size
-	jmp		wndproc_return_handled
-wndproc_wm_size:
-	cmp		ebx, WM_SIZE
-	jnz		wndproc_wm_exitsizemove
+	jmp		.return_handled
+.wm_size:
 	push	strlen_WM_SIZE
 	push	str_WM_SIZE
 	call	print
-	; update buffer size
-	mov		dx, word [ebp+20]
-	push	edx							; height
-	mov		dx, word [ebp+22]
-	push	edx							; width
-	push	BackBuffer
-	call	set_screen_size
-	jmp		wndproc_return_handled
-wndproc_wm_exitsizemove:
-	cmp		ebx, WM_EXITSIZEMOVE
-	jnz		wndproc_wm_close
+	jmp		.return_handled
+.wm_exitsizemove:
 	push	strlen_WM_EXITSIZEMOVE
 	push	str_WM_EXITSIZEMOVE
 	call	print
-	jmp		wndproc_return_handled
-wndproc_wm_close:
-	cmp		ebx, WM_CLOSE
-	jnz		wndproc_wm_destroy
+	jmp		.return_handled
+.wm_close:
 	push	strlen_WM_CLOSE
 	push	str_WM_CLOSE
 	call	print
-	;push	[WindowHandle]
-	;call	_DestroyWindow@4
 	jmp		exit						; not "proper" but the only way everything disappears instantly
-	jmp		wndproc_return_handled
-wndproc_wm_destroy:
-	cmp		ebx, WM_DESTROY
-	jnz		wndproc_wm_activateapp
+	jmp		.return_handled
+.wm_destroy:
 	push	strlen_WM_DESTROY
 	push	str_WM_DESTROY
 	call	print
-	;push	0
-	;call	_PostQuitMessage@4
 	jmp		exit						; not "proper" but the only way everything disappears instantly
-	jmp		wndproc_return_handled
-wndproc_wm_activateapp:
-	cmp		ebx, WM_ACTIVATEAPP
-	jnz		wndproc_default
+	jmp		.return_handled
+.wm_activateapp:
 	push	strlen_WM_ACTIVATEAPP
 	push	str_WM_ACTIVATEAPP
 	call	print
-	jmp		wndproc_return_handled
-wndproc_default:
+	jmp		.return_handled
+.default:
 	mov		ecx, [ebp+20]
 	push	ecx
 	mov		ecx, [ebp+16]
@@ -462,11 +507,11 @@ wndproc_default:
 	mov		ecx, [ebp+8]
 	push	ecx
 	call	_DefWindowProcA@16
-	jmp		wndproc_return				; eax should hold return value here
+	jmp		.return						; eax should hold return value here
 	; epilogue
-wndproc_return_handled:
+.return_handled:
 	mov		eax, 0
-wndproc_return:
+.return:
 	pop		edx
 	pop		ecx
 	pop		ebx
@@ -475,7 +520,7 @@ wndproc_return:
 
 ; TODO: output formatted message containing error code
 ;  see: GetLastError, FormatMessageA
-; display error message in a messagebox and exit
+; display error message with error code in a messagebox and exit
 ; fn show_error_and_exit(message: [*:0]const u8) callconv(.stdcall) noreturn
 show_error_and_exit:
 	; prologue
@@ -491,7 +536,7 @@ show_error_and_exit:
 	push	str_errmsg_format			; src
 	push	ebx							; dst
 	call	strcpy
-	add		ebx, [strloc_errmsg_format_err]
+	add		ebx, strloc_errmsg_format_err
 	call	_GetLastError@0
 	push	ebx
 	push	eax
@@ -514,6 +559,7 @@ show_error_and_exit:
 	pop		ebx
 	pop		eax
 	pop		ebp
+	ret		4
 
 ; attach console and get std i/o handle
 ; fn init_stdio(handle: *HANDLE) callconv(.stdcall) void
@@ -528,20 +574,20 @@ init_stdio:
 	push	ATTACH_PARENT_PROCESS
 	call	_AttachConsole@4
 	cmp		eax, 0
-	jnz		init_stdio_get_handle
+	jnz		.get_handle
 	cmp		eax, ERROR_ACCESS_DENIED	; already attached to console, apparently
-	jnz		init_stdio_get_handle
+	jnz		.get_handle
 	push	str_AttachConsole
 	call	show_error_and_exit
-init_stdio_get_handle:
+.get_handle:
 	push	STD_OUTPUT_HANDLE
 	call	_GetStdHandle@4
 	mov		[ebx], eax					; output handle
 	cmp		eax, INVALID_VALUE_HANDLE
-	jnz		init_stdio_done
+	jnz		.done
 	push	str_GetStdHandle
 	call	show_error_and_exit
-init_stdio_done:
+.done:
 	; epilogue
 	pop		ebx
 	pop		eax
@@ -570,11 +616,11 @@ print:
 	push	[StdHandle]				; hConsoleOutput
 	call	_WriteConsoleA@20
 	cmp		eax, NULL
-	jnz		print_success
+	jnz		.success
 	push	str_WriteConsoleA
 	call	show_error_and_exit
 	; epilogue
-print_success:
+.success:
 	add		esp, 4
 	pop		edx
 	pop		ebx
@@ -624,19 +670,19 @@ htoa:
 	mov		ebx, [ebp+8]				; val
 	mov		eax, [ebp+12]				; out
 	mov		ecx, 8						; ecx = i
-htoa_loop:
+.loop:
 	sub		ecx, 1
 	mov		edx, ebx					; val
 	and		edx, 0xF
 	add		edx, 0x30					; edx += '0' 
 	cmp		edx, 0x39
-	jle		htoa_loop_out					; char < A
+	jle		.loop_out					; char < A
 	add		edx, 0x07					; edx += 'A'-':'
-htoa_loop_out:
+.loop_out:
 	mov		byte [eax+ecx], dl			; out[i]
 	shr		ebx, 4						; val >> 4
 	cmp		ecx, 0
-	jg		htoa_loop
+	jg		.loop
 	; epilogue
 	pop		edx
 	pop		ecx
@@ -660,13 +706,13 @@ strcpy:
 	mov		eax, [ebp+8]
 	mov		ebx, [ebp+12]
 	mov		cl, 0
-strcpy_loop:
+.loop:
 	mov		cl, byte [ebx]
 	mov		byte [eax], cl
 	inc		eax
 	inc		ebx
 	cmp		cl, 0
-	jnz		strcpy_loop
+	jnz		.loop
 	; epilogue
 	pop		ecx
 	pop		ebx
@@ -685,35 +731,36 @@ set_screen_size:
 	push	ebx
 	push	ecx
 	push	edx
-	; work
+	; free existing memory if needed
 	mov		eax, [BackBuffer+ScreenBuffer.Memory]
 	cmp		eax, 0
-	jz		set_screen_size_free_ok
+	jz		.free_ok
 	mov		eax, [BackBuffer+ScreenBuffer.Memory]
   	push	MEM_RELEASE					; [in] DWORD  dwFreeType
   	push	0							; [in] SIZE_T dwSize,
 	push	eax							; [in] LPVOID lpAddress,
 	call	_VirtualFree@12
 	cmp		eax, 0
-	jnz		set_screen_size_free_ok
+	jnz		.free_ok
     push	str_VirtualFree
 	call	show_error_and_exit
-set_screen_size_free_ok:
+.free_ok:
+	; fill in the buffer info and alloc new memory
 	mov		ecx, [ebp+12]
 	mov		edx, [ebp+16]
-	mov		[BackBuffer+ScreenBuffer.Width], ecx
-	mov		[BackBuffer+ScreenBuffer.Height], edx
-	mov		[BackBuffer+ScreenBuffer.BytesPerPixel], 4
+	mov		dword [BackBuffer+ScreenBuffer.Width], ecx
+	mov		dword [BackBuffer+ScreenBuffer.Height], edx
+	mov		dword [BackBuffer+ScreenBuffer.BytesPerPixel], 4
 	lea		ebx, [BackBuffer+ScreenBuffer.Info]
-	mov		[ebx+0x00], 0x40								;  biSize
-	mov		[ebx+0x04], ecx									;  biWidth
-	mov		[ebx+0x08], 0									;  biHeight
-	sub		[ebx+0x08], edx									;   negative = top-down
-	mov		[ebx+0x0C], 1									;  biPlanes
-	mov		[ebx+0x10], 32									;  biBitCount
-	mov		[ebx+0x14], BI_RGB								;  biCompression
+	mov		dword [ebx+BITMAPINFOHEADER.biSize], BITMAPINFOHEADER_size
+	mov		dword [ebx+BITMAPINFOHEADER.biWidth], ecx
+	mov		dword [ebx+BITMAPINFOHEADER.biHeight], 0
+	sub		dword [ebx+BITMAPINFOHEADER.biHeight], edx
+	mov		word [ebx+BITMAPINFOHEADER.biPlanes], 1
+	mov		word [ebx+BITMAPINFOHEADER.biBitCount], 32
+	mov		dword [ebx+BITMAPINFOHEADER.biCompression], BI_RGB
 	shl		ecx, 2											; bitmap size = Width * BytesPerPixel(4)
-	mov		[BackBuffer+ScreenBuffer.Pitch], ecx
+	mov		dword [BackBuffer+ScreenBuffer.Pitch], ecx
 	mul		ecx, edx										; bitmap size = Width * Height * BytesPerPixel(4)
 	push	PAGE_READWRITE									; flProtect
 	push	MEM_COMMIT										; flAllocationType
@@ -721,11 +768,11 @@ set_screen_size_free_ok:
 	push	0												; lpAddress
 	call	_VirtualAlloc@16
 	cmp		eax, 0
-	jnz		set_screen_size_alloc_ok
+	jnz		.alloc_ok
     push	str_VirtualAlloc
 	call	show_error_and_exit
-set_screen_size_alloc_ok:
-	mov		[BackBuffer+0x10], eax
+.alloc_ok:
+	mov		[BackBuffer+ScreenBuffer.Memory], eax
 	; epilogue
 	pop		edx
 	pop		ecx
@@ -734,3 +781,56 @@ set_screen_size_alloc_ok:
 	pop		ebp
 	ret		12
 
+; fn pixel_flood(color: u32) callconv(.stdcall) void
+pixel_flood:
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
+	push	ecx
+	; flood
+	mov		ecx, [ebp+8]
+	mov		ebx, [BackBuffer+ScreenBuffer.Height]
+	mul		ebx, [BackBuffer+ScreenBuffer.Width]
+	shl		ebx, 2											; bitmap size = Width * BytesPerPixel(4)
+	mov		eax, [BackBuffer+ScreenBuffer.Memory]
+.loop:
+	mov		dword [eax], ecx
+	add		eax, 4
+	sub		ebx, 4
+	cmp		ebx, 0
+	jnz		.loop
+	; epilogue
+	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
+	ret		4
+
+; fn pixel_write(x: u32, y: u32, color: u32) callconv(.stdcall) void
+pixel_write:
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
+	push	ecx
+	; write
+	mov		ebx, [ebp+12]
+	cmp		ebx, [BackBuffer+ScreenBuffer.Height]
+	jge		.return
+	mul		ebx, [BackBuffer+ScreenBuffer.Pitch]
+	mov		ecx, [ebp+8]
+	cmp		ecx, [BackBuffer+ScreenBuffer.Width]
+	jge		.return
+	shl		ecx, 2
+	add		ebx, ecx
+	mov		ecx, [ebp+16]
+	mov		eax, [BackBuffer+ScreenBuffer.Memory]
+	mov		dword [eax+ebx], ecx
+	; epilogue
+.return:
+	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
+	ret		12

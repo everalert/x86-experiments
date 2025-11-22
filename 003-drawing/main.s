@@ -6,9 +6,6 @@
 ; main.exe
 
 
-; TODO: limit how small you can make the window
-
-
 global _main
 
 extern _GetModuleHandleA@4	; kernel32.dll
@@ -39,6 +36,7 @@ extern _EndPaint@8			; user32.dll
 extern _GetDC@4				; user32.dll
 extern _ReleaseDC@8			; user32.dll
 extern _GetClientRect@8		; user32.dll
+extern _GetSystemMetrics@4	; user32.dll
 extern _StretchDIBits@52	; gdi32.dll
 
 
@@ -96,6 +94,19 @@ struc BITMAPINFOHEADER
 	.biClrImportant				resd 1
 endstruc
 
+struc MINMAXINFO
+	.ptReserved					resb POINT_size
+	.ptMaxSize					resb POINT_size
+	.ptMaxPosition				resb POINT_size
+	.ptMinTrackSize				resb POINT_size
+	.ptMaxTrackSize				resb POINT_size
+endstruc
+
+struc POINT
+	.x							resd 1
+	.y							resd 1
+endstruc
+
 
 section .data
 	
@@ -117,6 +128,7 @@ section .data
 	WM_PAINT						equ 0x000F
 	WM_CLOSE						equ 0x0010
 	WM_ACTIVATEAPP					equ 0x001C
+	WM_GETMINMAXINFO				equ 0x0024
 	WM_EXITSIZEMOVE					equ 0x0232
 	CS_VREDRAW						equ	0x0001
 	CS_HREDRAW						equ	0x0002
@@ -189,15 +201,17 @@ section .data
 	strlen_WM_DESTROY				equ $-str_WM_DESTROY
 	str_WM_PAINT					db "WM_PAINT",10,0
 	strlen_WM_PAINT					equ $-str_WM_PAINT
+	str_WM_GETMINMAXINFO			db "WM_GETMINMAXINFO",10,0
+	strlen_WM_GETMINMAXINFO			equ $-str_WM_GETMINMAXINFO
 
 
 section .bss
 
 	ModuleHandle:				resd 1
 	StdHandle:					resd 1
+	DeviceContextHandle:		resd 1
 	WindowHandle:				resd 1
 	WindowMessage:				resd 1
-	DeviceContextHandle:		resd 1
 	WindowClass:				resb WNDCLASSEXA_size
 
 	BackBuffer					resb ScreenBuffer_size
@@ -380,16 +394,18 @@ wndproc:
 	; handle messages
 	cmp		ebx, WM_PAINT
 	jz		.wm_paint
-	cmp		ebx, WM_SIZE
-	jz		.wm_size
-	cmp		ebx, WM_EXITSIZEMOVE
-	jz		.wm_exitsizemove
+	;cmp	ebx, WM_SIZE
+	;jz		.wm_size
+	;cmp	ebx, WM_EXITSIZEMOVE
+	;jz		.wm_exitsizemove
 	cmp		ebx, WM_CLOSE
 	jz		.wm_close
 	cmp		ebx, WM_DESTROY
 	jz		.wm_destroy
-	cmp		ebx, WM_ACTIVATEAPP
-	jz		.wm_activateapp
+	;cmp	ebx, WM_ACTIVATEAPP
+	;jz		.wm_activateapp
+	cmp		ebx, WM_GETMINMAXINFO
+	jz		.wm_getminmaxinfo
 	jmp		.default
 .wm_paint:
 	push	strlen_WM_PAINT
@@ -446,8 +462,7 @@ wndproc:
   	push	[edx+PAINTSTRUCT.rcPaint+RECT.Lf]	; xDest
 	push	[DeviceContextHandle]				; hdc
 	call	_StretchDIBits@52
-	cmp		eax, 0								; FIXME: prevent 0 width or height, causes this to be 0
-												; TODO: check for GDI_ERROR 
+	cmp		eax, 0								; TODO: check for GDI_ERROR 
 	jg		.wm_paint_stretchdibits_ok
 	push	str_StretchDIBits
 	call	show_error_and_exit					; FIXME: simply crashes without showing the dialog?
@@ -494,6 +509,14 @@ wndproc:
 	push	strlen_WM_ACTIVATEAPP
 	push	str_WM_ACTIVATEAPP
 	call	print
+	jmp		.return_handled
+.wm_getminmaxinfo:
+	push	strlen_WM_GETMINMAXINFO
+	push	str_WM_GETMINMAXINFO
+	call	print
+	mov		ecx, [ebp+20]				; *MINMAXINFO
+	add		[ecx+MINMAXINFO.ptMinTrackSize+POINT.x], 16
+	add		[ecx+MINMAXINFO.ptMinTrackSize+POINT.y], 16
 	jmp		.return_handled
 .default:
 	mov		ecx, [ebp+20]

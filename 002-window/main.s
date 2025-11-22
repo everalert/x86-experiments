@@ -1,5 +1,5 @@
 ; minimal windowing via win32 api
-; 2025/11/16
+; 2025/11/17
 ;
 ; nasm -fwin32 main.s
 ; GoLink /entry _main main.obj user32.dll kernel32.dll

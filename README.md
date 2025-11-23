@@ -19,7 +19,7 @@ LLD 12.0.0
 
 Build and run with either of the following:
 
-```python
+```
 ./build ###
 ./run ###
 ```

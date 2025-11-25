@@ -19,11 +19,15 @@ LLD 12.0.0
 
 Build and run with either of the following:
 
+```batch
+./b /BUILD /###
+./b /RUN /###
 ```
-./build ###
-./run ###
+```batch
+:: build and run in one step
+./b /BUILD /RUN /###
 ```
-```
+```batch
 cd <project>
 ./build
 ./run

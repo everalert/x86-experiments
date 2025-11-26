@@ -1,5 +1,5 @@
-; drawing some shapes in a win32 window
-; 2025/11/19
+; win32 rawinput
+; 2025/11/26
 ;
 ; nasm -fwin32 main.s
 ; GoLink /entry _main main.obj user32.dll kernel32.dll
@@ -24,10 +24,12 @@ extern _VirtualFree@12				; kernel32.dll
 extern _GetLastError@0				; kernel32.dll
 extern _SetLastError@4				; kernel32.dll
 extern _FormatMessageA@28			; kernel32.dll
+extern _Sleep@4						; kernel32.dll
 extern _MessageBoxA@16				; user32.dll
 extern _CreateWindowExA@48			; user32.dll
 extern _DestroyWindow@4				; user32.dll
 extern _GetMessageA@16				; user32.dll
+extern _PeekMessageA@20				; user32.dll
 extern _TranslateMessage@4			; user32.dll
 extern _DispatchMessageA@4			; user32.dll
 extern _PostQuitMessage@4			; user32.dll
@@ -162,8 +164,12 @@ section .data
 	FORMAT_MESSAGE_FROM_SYSTEM		equ 0x00001000
 	ERROR_ACCESS_DENIED				equ 0x00000005
 	GDI_ERROR						equ	0xFFFFFFFF
+	PM_NOREMOVE						equ 0x0000
+	PM_REMOVE						equ 0x0001
+	PM_NOYIELD						equ 0x0002
 
 	; our stuff
+	AppRunning						dd 1
     str_window_name					db "TestWindow",0
 	str_wndclass_name				db "TestWndClass",0
 	str_newline						db 10,0
@@ -208,6 +214,8 @@ section .data
 	strlen_WM_PAINT					equ $-str_WM_PAINT
 	str_WM_GETMINMAXINFO			db "WM_GETMINMAXINFO",10,0
 	strlen_WM_GETMINMAXINFO			equ $-str_WM_GETMINMAXINFO
+	str_bbuf_render					db "BackBuffer Render",10,0
+	strlen_bbuf_render				equ $-str_bbuf_render
 
 
 section .bss
@@ -218,8 +226,10 @@ section .bss
 	WindowHandle:					resd 1
 	WindowMessage:					resd 1
 	WindowClass:					resb WNDCLASSEXA_size
+	WindowSize:						resb RECT_size
 
 	BackBuffer						resb ScreenBuffer_size
+	FrameCount						resd 1
  
 
 section .text
@@ -345,7 +355,7 @@ create_window:
 	push 	str_wndclass_name
 	push 	WS_EX_CLIENTEDGE
 	call	_CreateWindowExA@48
-	push	eax						; print HWND
+	push	eax							; print HWND
 	call	print_u32
 	cmp		eax, 0
 	jnz		.success
@@ -357,31 +367,50 @@ create_window:
 	pop		ebx
 	mov		[WindowHandle], eax
 
-msg_loop:
+; FIXME: fix flickering/low "fps" that happens when the background color changes 
+;  in vbuf_draw_test. the actual draw calls are happening quickly, but somehow
+;  the actual graphics on the window are updated infrequently relative to the
+;  draw call speed, and skip showing some frames. lowering the sleep time seems
+;  to alleviate this somewhat, but appears to mostly speed up the whole process
+;  rather than actually draw more frames. however, calling in WM_PAINT shows that
+;  the window is capable of showing the frames quickly, so something may be
+;  missing from the main loop version.
+; FIXME: remove white flash that appears before first frame renders; for some 
+;  reason, switching from GetMessageA to PeekMessageA caused this to start
+;  happening. is it because the window sleeps at the beginning? the white flash
+;  is clearly shorter with a smaller sleep.
+app_loop:
+	;call	backbuffer_resize
+	;call	vbuf_draw_test
+.msg_loop:
+	push	PM_REMOVE
 	push	0
 	push	0
-	push	0
+	push	[WindowHandle]				; NOTE: pushing 0 ok too
 	push	WindowMessage
-	call	_GetMessageA@16			; switch to PeekMessage (non-blocking) and timed outer loop
+	call	_PeekMessageA@20
 	cmp		eax, 0
-	; TODO: also handle -1 (error) case before processing messages; see GetMessage
-	; on MSDN for details (not applicable to PeekMessage)
-	jng		done					
+	jng		.msg_loop_end
 	push	WindowMessage
 	call	_TranslateMessage@4
 	push	WindowMessage
 	call	_DispatchMessageA@4
-	jmp		msg_loop
+.msg_loop_end:
+	cmp		[AppRunning], 0
+	je		exit
+	inc		dword [FrameCount]
+	call	backbuffer_resize
+	call	vbuf_draw_test
+	call	backbuffer_render
+	push	7							; ~143fps
+	;push	16							; ~60fps
+	call	_Sleep@4
+	jmp		.msg_loop
 
 ; end program
 	
-done:
-	mov		ebx, [WindowMessage]
-    push	[ebx+0x08]				; wParam 	
-    call	_ExitProcess@4
-
 exit:
-    push	0						; no error
+    push	0							; no error
     call	_ExitProcess@4 
 
 ; functions
@@ -395,7 +424,7 @@ wndproc:
 	push	ebx
 	push	ecx
 	push	edx
-	mov		ebx, [ebp+12]			; msg
+	mov		ebx, [ebp+12]				; msg
 	; handle messages
 	cmp		ebx, WM_PAINT
 	jz		.wm_paint
@@ -416,71 +445,16 @@ wndproc:
 	push	strlen_WM_PAINT
 	push	str_WM_PAINT
 	call	print
-	; update size
-	sub		esp, RECT_size
-	mov		eax, esp
-	push	eax
-	push	[WindowHandle]
-	call	_GetClientRect@8
-	mov		eax, esp
-	push	dword [eax+RECT.Bt]
-	push	dword [eax+RECT.Rt]
-	push	BackBuffer
-	call	set_screen_size
-	add		esp, RECT_size
-	; put some stuff in the buffer
-	call	vbuf_draw_test
-	; (re)draw
+	; beginpaint
 	sub		esp, PAINTSTRUCT_size
 	mov		edx, esp
 	push	edx
 	push	[WindowHandle]
 	call	_BeginPaint@8
-	mov		edx, esp
-	; getdc
-	push	[WindowHandle]
-	call	_GetDC@4	
-	cmp		eax, 0
-	jnz		.wm_paint_getdc_ok
-	push	str_GetDC
-	call	show_error_and_exit
-.wm_paint_getdc_ok:
-	mov		[DeviceContextHandle], eax
-	mov		edx, esp
-	; stretchdibits
-  	push	ROP_SRCCOPY							; rop			
-  	push	DIB_RGB_COLORS						; iUsage
-  	lea		eax, [BackBuffer+ScreenBuffer.Info]
-  	push	eax									; *lpbmi
-  	push	[BackBuffer+ScreenBuffer.Memory]	; *lpBits
-  	push	[BackBuffer+ScreenBuffer.Height]	; SrcHeight
-  	push	[BackBuffer+ScreenBuffer.Width]		; SrcWidth
-  	push	0									; ySrc
-	push	0									; xSrc
-  	mov		eax, dword [edx+PAINTSTRUCT.rcPaint+RECT.Bt]	; DestHeight
-	sub		eax, dword [edx+PAINTSTRUCT.rcPaint+RECT.Tp]
-	push	eax
-  	mov		eax, dword [edx+PAINTSTRUCT.rcPaint+RECT.Rt]	; DestWidth
-	sub		eax, dword [edx+PAINTSTRUCT.rcPaint+RECT.Lf]
-	push	eax
-  	push	[edx+PAINTSTRUCT.rcPaint+RECT.Tp]	; yDest
-  	push	[edx+PAINTSTRUCT.rcPaint+RECT.Lf]	; xDest
-	push	[DeviceContextHandle]				; hdc
-	call	_StretchDIBits@52
-	cmp		eax, 0							; TODO: check for GDI_ERROR 
-	jg		.wm_paint_stretchdibits_ok
-	push	str_StretchDIBits
-	call	show_error_and_exit				; FIXME: simply crashes without showing the dialog?
-.wm_paint_stretchdibits_ok:
-	; releasedc
-	push	[DeviceContextHandle]
-	push	[WindowHandle]
-	call	_ReleaseDC@8
-	cmp		eax, 0
-	jnz		.wm_paint_releasedc_ok
-	push	str_ReleaseDC
-	call	show_error_and_exit
-.wm_paint_releasedc_ok:
+	call	backbuffer_resize
+	call	vbuf_draw_test
+	; (re)draw
+	call	backbuffer_render
 	; endpaint
 	mov		edx, esp
 	push	edx
@@ -502,13 +476,15 @@ wndproc:
 	push	strlen_WM_CLOSE
 	push	str_WM_CLOSE
 	call	print
-	jmp		exit					; not "proper" but the only way everything disappears instantly
+	mov		[AppRunning], 0
+	;jmp		exit					; not "proper" but the only way everything disappears instantly
 	jmp		.return_handled
 .wm_destroy:
 	push	strlen_WM_DESTROY
 	push	str_WM_DESTROY
 	call	print
-	jmp		exit					; not "proper" but the only way everything disappears instantly
+	mov		[AppRunning], 0
+	;jmp		exit					; not "proper" but the only way everything disappears instantly
 	jmp		.return_handled
 .wm_activateapp:
 	push	strlen_WM_ACTIVATEAPP
@@ -543,6 +519,92 @@ wndproc:
 	pop		ebx
 	pop		ebp
 	ret		16
+
+; fn backbuffer_resize() callconv(.stdcall) void
+backbuffer_resize:
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
+	push	ecx
+	sub		esp, RECT_size
+	; size
+	mov		eax, esp
+	push	eax
+	push	[WindowHandle]
+	call	_GetClientRect@8
+	mov		eax, esp
+	mov		ebx, dword [eax+RECT.Bt]
+	mov		ecx, dword [eax+RECT.Rt]
+	cmp		[WindowSize+RECT.Bt], ebx
+	jnz		.resize_ok
+	cmp		[WindowSize+RECT.Rt], ecx
+	jnz		.resize_ok
+	jmp		.resize_end
+.resize_ok:
+	push	ebx	
+	push	ecx	
+	push	BackBuffer
+	call	set_screen_size
+	mov		[WindowSize+RECT.Bt], ebx
+	mov		[WindowSize+RECT.Rt], ecx
+	; epilogue
+.resize_end:
+	add		esp, RECT_size
+	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
+	ret
+
+; fn backbuffer_render() callconv(.stdcall) void
+backbuffer_render:
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	; getdc
+	push	[WindowHandle]
+	call	_GetDC@4	
+	cmp		eax, 0
+	jnz		.wm_paint_getdc_ok
+	push	str_GetDC
+	call	show_error_and_exit
+.wm_paint_getdc_ok:
+	mov		[DeviceContextHandle], eax
+	; stretchdibits
+  	push	ROP_SRCCOPY							; rop			
+  	push	DIB_RGB_COLORS						; iUsage
+  	lea		eax, [BackBuffer+ScreenBuffer.Info]
+  	push	eax									; *lpbmi
+  	push	[BackBuffer+ScreenBuffer.Memory]	; *lpBits
+  	push	[BackBuffer+ScreenBuffer.Height]	; SrcHeight
+  	push	[BackBuffer+ScreenBuffer.Width]		; SrcWidth
+  	push	0									; ySrc
+	push	0									; xSrc
+	push	[WindowSize+RECT.Bt]
+	push	[WindowSize+RECT.Rt]
+	push	0
+	push	0
+	push	[DeviceContextHandle]				; hdc
+	call	_StretchDIBits@52
+	cmp		eax, 0							; TODO: check for GDI_ERROR 
+	jg		.wm_paint_stretchdibits_ok
+	push	str_StretchDIBits
+	call	show_error_and_exit				; FIXME: simply crashes without showing the dialog?
+.wm_paint_stretchdibits_ok:
+	; releasedc
+	push	[DeviceContextHandle]
+	push	[WindowHandle]
+	call	_ReleaseDC@8
+	cmp		eax, 0
+	jnz		.wm_paint_releasedc_ok
+	push	str_ReleaseDC
+	call	show_error_and_exit
+.wm_paint_releasedc_ok:
+	; epilogue
+	pop		eax
+	pop		ebp
+	ret
 
 ; TODO: output formatted message containing error code
 ;  see: GetLastError, FormatMessageA
@@ -825,7 +887,11 @@ vbuf_draw_test:
 	shr		eax, 1
 	mov		[esp+4], eax
 	; clear
-	push	0x101010				; 0xRRGGBB
+	mov		ecx, dword [FrameCount]
+	and		ecx, 0x0000FF
+	or		ecx, 0x101010
+	push	ecx
+	;push	0x101010				; 0xRRGGBB
 	call	vbuf_flood			
 	; circle
 	mov		ecx, [esp+0]

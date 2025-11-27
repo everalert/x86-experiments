@@ -6,57 +6,14 @@
 ; main.exe
 
 
-; TODO: println (and update stuff that is implicitly/manually doing println)
-; TODO: itoa
-; TODO: btoa
 ; TODO: console-based error printing
-; TODO: print error with errcode
+; TODO: print error with error code message
 
 
 global _main
 
-extern _GetModuleHandleA@4			; kernel32.dll
-extern _GetStdHandle@4				; kernel32.dll
-extern _AttachConsole@4				; kernel32.dll
-extern _GetConsoleWindow@0			; kernel32.dll
-extern _WriteConsoleA@20			; kernel32.dll
-extern _ExitProcess@4				; kernel32.dll
-extern _VirtualAlloc@16				; kernel32.dll
-extern _VirtualFree@12				; kernel32.dll
-extern _GetLastError@0				; kernel32.dll
-extern _SetLastError@4				; kernel32.dll
-extern _FormatMessageA@28			; kernel32.dll
-extern _Sleep@4						; kernel32.dll
-extern _MessageBoxA@16				; user32.dll
-extern _CreateWindowExA@48			; user32.dll
-extern _DestroyWindow@4				; user32.dll
-extern _GetMessageA@16				; user32.dll
-extern _PeekMessageA@20				; user32.dll
-extern _TranslateMessage@4			; user32.dll
-extern _DispatchMessageA@4			; user32.dll
-extern _PostQuitMessage@4			; user32.dll
-extern _DefWindowProcA@16			; user32.dll
-extern _LoadImageA@24				; user32.dll
-extern _RegisterClassExA@4			; user32.dll
-extern _AdjustWindowRect@12			; user32.dll
-extern _ValidateRect@8				; user32.dll
-extern _InvalidateRect@12			; user32.dll
-extern _BeginPaint@8				; user32.dll
-extern _EndPaint@8					; user32.dll
-extern _GetDC@4						; user32.dll
-extern _ReleaseDC@8					; user32.dll
-extern _GetClientRect@8				; user32.dll
-extern _GetSystemMetrics@4			; user32.dll
-extern _SetTimer@16					; user32.dll
-extern _CreateCompatibleDC@4		; gdi32.dll
-extern _DeleteDC@4					; gdi32.dll
-extern _GetObject@12				; gdi32.dll
-extern _DeleteObject@4				; gdi32.dll
-extern _SelectObject@8				; gdi32.dll
-extern _SetDIBits@28				; gdi32.dll
-extern _StretchDIBits@52			; gdi32.dll
-extern _StretchBlt@44				; gdi32.dll
-extern _CreateDIBSection@24			; gdi32.dll
+%include "win32.s"
+%include "string.s"
 
 
 struc ScreenBuffer
@@ -69,118 +26,11 @@ struc ScreenBuffer
 	.Info							resb 0x40	; BITMAPINFOHEADER
 endstruc
 
-struc RECT
-	.Lf								resd 1
-	.Tp								resd 1
-	.Rt								resd 1
-	.Bt								resd 1
-endstruc
-
-struc PAINTSTRUCT
-	.hDC							resd 1
-	.fErase							resd 1
-	.rcPaint						resb RECT_size
-	.fRestore						resd 1
-	.fIncUpdate						resd 1
-	.rgbReserved					resb 32
-endstruc
-
-struc WNDCLASSEXA
-	.cbSize							resd 1
-	.style							resd 1
-	.lpfnWndProc					resd 1
-	.cbClsExtra						resd 1
-	.cbWndExtra						resd 1
-	.hInstance						resd 1
-	.hIcon							resd 1
-	.hCursor						resd 1
-	.hbrBackground					resd 1
-	.lpszMenuName					resd 1
-	.lpszClassName					resd 1
-	.hIconSm						resd 1
-endstruc
-
-struc BITMAPINFOHEADER
-	.biSize							resd 1
-	.biWidth						resd 1
-	.biHeight						resd 1
-	.biPlanes						resw 1
-	.biBitCount						resw 1
-	.biCompression					resd 1
-	.biSizeImage					resd 1
-	.biXPelsPerMeter				resd 1
-	.biYPelsPerMeter				resd 1
-	.biClrUsed						resd 1
-	.biClrImportant					resd 1
-endstruc
-
-struc MINMAXINFO
-	.ptReserved						resb POINT_size
-	.ptMaxSize						resb POINT_size
-	.ptMaxPosition					resb POINT_size
-	.ptMinTrackSize					resb POINT_size
-	.ptMaxTrackSize					resb POINT_size
-endstruc
-
-struc POINT
-	.x								resd 1
-	.y								resd 1
-endstruc
-
 
 section .data
 	
 	DefaultW						equ 640
 	DefaultH						equ 360
-
-	; win32 constants
-	NULL							equ 0
-	ATTACH_PARENT_PROCESS			equ -1
-	INVALID_VALUE_HANDLE			equ -1
-	STD_OUTPUT_HANDLE				equ -11
-	IDI_APPLICATION					equ 0x7F00
-	IDC_ARROW						equ 0x7F00
-	COLOR_WINDOWFRAME				equ 6
-	LR_DEFAULTSIZE					equ 0x00000040
-	CW_USEDEFAULT					equ	0x80000000
-	WM_DESTROY						equ 0x0002
-	WM_SIZE							equ 0x0005
-	WM_PAINT						equ 0x000F
-	WM_CLOSE						equ 0x0010
-	WM_ACTIVATEAPP					equ 0x001C
-	WM_GETMINMAXINFO				equ 0x0024
-	WM_EXITSIZEMOVE					equ 0x0232
-	CS_VREDRAW						equ	0x0001
-	CS_HREDRAW						equ	0x0002
-	CS_OWNDC						equ	0x0020
-	WS_SHOWNORMAL					equ 1
-	WS_VISIBLE						equ 0x10000000
-	WS_OVERLAPPEDWINDOW				equ 0x00CF0000
-	WS_EX_CLIENTEDGE				equ 0x00000200
-	MB_OK							equ 0x00
-	MB_ICONEXCLAMATION				equ 0x30
-	MEM_COMMIT						equ 0x00001000
-	MEM_RESERVE						equ 0x00002000
-	MEM_DECOMMIT					equ 0x00004000
-	MEM_RELEASE						equ 0x00008000
-	PAGE_READONLY					equ 0x02
-	PAGE_READWRITE					equ 0x04
-	BI_RGB							equ 0
-	IMAGE_BITMAP					equ 0 ; C:\Program Files (x86)\Windows Kits\10\Include\<ver>\um\winuser.h
-	IMAGE_ICON						equ 1
-	IMAGE_CURSOR					equ 2
-	DIB_RGB_COLORS					equ 0
-	DIB_PAL_COLORS					equ 1
-	ROP_SRCCOPY						equ	0x00CC0020 ; just SRCCOPY in wingdi.h
-	FORMAT_MESSAGE_ALLOCATE_BUFFER	equ 0x00000100
-	FORMAT_MESSAGE_IGNORE_INSERTS	equ 0x00000200
-	FORMAT_MESSAGE_FROM_STRING		equ 0x00000400
-	FORMAT_MESSAGE_FROM_SYSTEM		equ 0x00001000
-	ERROR_ACCESS_DENIED				equ 0x00000005
-	GDI_ERROR						equ	0xFFFFFFFF
-	PM_NOREMOVE						equ 0x0000
-	PM_REMOVE						equ 0x0001
-	PM_NOYIELD						equ 0x0002
 
 	; our stuff
 	AppRunning						dd 1
@@ -191,49 +41,12 @@ section .data
 	str_errmsg_format				db "[ERROR] (00000000) ",0		; will be filled in and expanded by fn
 	strlen_errmsg_format			equ $-str_errmsg_format-1
 	strloc_errmsg_format_err		equ 9							; position of the start of the error code
-	str_RegisterClassExA			db "RegisterClassExA",0
-	str_CreateWindowExA				db "CreateWindowExA",0
-	str_GetModuleHandleA			db "GetModuleHandleA",0
-	str_AttachConsole				db "AttachConsole",0
-	str_GetStdHandle				db "GetStdHandle",0
-	str_GetConsoleWindow			db "GetConsoleWindow",0
-	str_WriteConsoleA				db "WriteConsoleA",0
-	str_VirtualAlloc				db "VirtualAlloc",0
-	str_VirtualFree					db "VirtualFree",0
-	str_AdjustWindowRect			db "AdjustWindowRect",0
-	str_GetDC						db "GetDC",0
-	str_ReleaseDC					db "ReleaseDC",0
-	str_DeleteObject				db "DeleteObject",0
-	str_StretchDIBits				db "StretchDIBits",0
-	str_StretchBlt					db "StretchBlt",0
-	str_CreateDIBSection			db "CreateDIBSection",0
-	str_BeginPaint					db "BeginPaint",0
 	str_get_hinst					db "Getting HINSTANCE",10,0
-	strlen_get_hinst				equ $-str_get_hinst
 	str_init_wndclass				db "Initializing Window Class",10,0
-	strlen_init_wndclass			equ $-str_init_wndclass
 	str_reg_wndclass				db "Registering Window Class",10,0
-	strlen_reg_wndclass				equ $-str_reg_wndclass
 	str_create_window				db "Creating Window",10,0
-	strlen_create_window			equ $-str_create_window
 	str_show_window					db "Showing Window",10,0
-	strlen_show_window				equ $-str_show_window
-	str_WM_EXITSIZEMOVE				db "WM_EXITSIZEMOVE",10,0
-	strlen_WM_EXITSIZEMOVE			equ $-str_WM_EXITSIZEMOVE
-	str_WM_SIZE						db "WM_SIZE",10,0
-	strlen_WM_SIZE					equ $-str_WM_SIZE
-	str_WM_ACTIVATEAPP				db "WM_ACTIVATEAPP",10,0
-	strlen_WM_ACTIVATEAPP			equ $-str_WM_ACTIVATEAPP
-	str_WM_CLOSE					db "WM_CLOSE",10,0
-	strlen_WM_CLOSE					equ $-str_WM_CLOSE
-	str_WM_DESTROY					db "WM_DESTROY",10,0
-	strlen_WM_DESTROY				equ $-str_WM_DESTROY
-	str_WM_PAINT					db "WM_PAINT",10,0
-	strlen_WM_PAINT					equ $-str_WM_PAINT
-	str_WM_GETMINMAXINFO			db "WM_GETMINMAXINFO",10,0
-	strlen_WM_GETMINMAXINFO			equ $-str_WM_GETMINMAXINFO
 	str_bbuf_render					db "BackBuffer Render",10,0
-	strlen_bbuf_render				equ $-str_bbuf_render
 
 
 section .bss
@@ -261,7 +74,6 @@ _main:
 ; window init
 
 get_hinstance:
-	push	strlen_get_hinst
 	push	str_get_hinst
 	call	print
 	push	NULL					; lpModuleName
@@ -273,10 +85,9 @@ get_hinstance:
 	call	show_error_and_exit
 .success:
 	push	eax						; print HINSTANCE
-	call	print_u32
+	call	print_h32
 
 initialize_window_class:
-	push	strlen_init_wndclass
 	push	str_init_wndclass
 	call	print
 	push	eax
@@ -298,7 +109,7 @@ initialize_window_class:
 	push	ecx												; hInstance
     call	_LoadImageA@24
 	push	eax												; print LoadImageA(Icon) result
-	call	print_u32
+	call	print_h32
 	mov		dword [WindowClass+WNDCLASSEXA.hIcon], eax
 	mov		dword [WindowClass+WNDCLASSEXA.hIconSm], eax
 	push	LR_DEFAULTSIZE									; fuLoad
@@ -309,7 +120,7 @@ initialize_window_class:
 	push	ecx												; hInstance
     call	_LoadImageA@24
 	push	eax												; print LoadImageA(Cursor) result
-	call	print_u32
+	call	print_h32
 	mov		dword [WindowClass+WNDCLASSEXA.hCursor], eax
 	mov		dword [WindowClass+WNDCLASSEXA.hbrBackground], COLOR_WINDOWFRAME
 	mov		dword [WindowClass+WNDCLASSEXA.lpszMenuName], 0
@@ -319,13 +130,12 @@ initialize_window_class:
 	pop		eax
 
 register_wndclass:
-	push	strlen_reg_wndclass
 	push	str_reg_wndclass
 	call	print
 	push	WindowClass
 	call	_RegisterClassExA@4
 	push	eax						; print result
-	call	print_u32
+	call	print_h32
 	cmp		eax, 0
 	jnz		.success
     push	str_RegisterClassExA
@@ -335,7 +145,6 @@ register_wndclass:
 ; showing window
 
 create_window:
-	push	strlen_create_window
 	push	str_create_window
 	call	print					; "Creating Window"
 	push	ebx
@@ -373,7 +182,7 @@ create_window:
 	push 	WS_EX_CLIENTEDGE
 	call	_CreateWindowExA@48
 	push	eax							; print HWND
-	call	print_u32
+	call	print_h32
 	cmp		eax, 0
 	jnz		.success
     push	str_CreateWindowExA
@@ -470,7 +279,6 @@ wndproc:
 	jz		.wm_getminmaxinfo
 	jmp		.default
 .wm_paint:
-	push	strlen_WM_PAINT
 	push	str_WM_PAINT
 	call	print
 	; prep
@@ -497,36 +305,30 @@ wndproc:
 	add		esp, PAINTSTRUCT_size
 	jmp		.return_handled
 .wm_size:
-	push	strlen_WM_SIZE
 	push	str_WM_SIZE
 	call	print
 	jmp		.return_handled
 .wm_exitsizemove:
-	push	strlen_WM_EXITSIZEMOVE
 	push	str_WM_EXITSIZEMOVE
 	call	print
 	jmp		.return_handled
 .wm_close:
-	push	strlen_WM_CLOSE
 	push	str_WM_CLOSE
 	call	print
 	mov		[AppRunning], 0
 	;jmp		exit					; not "proper" but the only way everything disappears instantly
 	jmp		.return_handled
 .wm_destroy:
-	push	strlen_WM_DESTROY
 	push	str_WM_DESTROY
 	call	print
 	mov		[AppRunning], 0
 	;jmp		exit					; not "proper" but the only way everything disappears instantly
 	jmp		.return_handled
 .wm_activateapp:
-	push	strlen_WM_ACTIVATEAPP
 	push	str_WM_ACTIVATEAPP
 	call	print
 	jmp		.return_handled
 .wm_getminmaxinfo:
-	push	strlen_WM_GETMINMAXINFO
 	push	str_WM_GETMINMAXINFO
 	call	print
 	mov		ecx, [ebp+20]			; *MINMAXINFO
@@ -715,9 +517,38 @@ init_stdio:
 	pop		ebp
 	ret		4
 
-; print to console
-; fn print(buf: [*]const u8, len: u32) callconv(.stdcall) void
+; print to console. use `printn` for non-null-terminated strings
+; fn print(buf: [*:0]const u8) callconv(.stdcall) void
 print: 
+	; prologue
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	edx
+	; write to console
+	lea		edx, [esp-4]
+	push	[ebp+8]
+	call	strlen
+	push	NULL					; lpVoidReserved
+	push	edx						; lpNumberOfCharsWritten
+	push	eax						; nNumberOfCharsToWrite
+	push	[ebp+8]					; lpBuffer
+	push	[StdHandle]				; hConsoleOutput
+	call	_WriteConsoleA@20
+	cmp		eax, NULL
+	jnz		.success
+	push	str_WriteConsoleA
+	call	show_error_and_exit
+	; epilogue
+.success:
+	pop		ebx
+	pop		eax
+	pop		ebp
+	ret		4
+
+; print to console
+; fn printn(buf: [*]const u8, len: u32) callconv(.stdcall) void
+printn: 
 	; prologue
 	push	ebp
 	mov		ebp, esp
@@ -750,96 +581,126 @@ print:
 	pop		ebp
 	ret		8
 
+; print to console with newline. use `printnln` for non-null-terminated strings
+; fn println(buf: [*:0]const u8) callconv(.stdcall) void
+println: 
+	; prologue
+	push	ebp
+	mov		ebp, esp
+	; write to console
+	push	[ebp+8]
+	call	print
+	push	str_newline
+	call	print
+	; epilogue
+.success:
+	pop		ebp
+	ret		4
+
+; print to console with newline
+; fn printnln(buf: [*]const u8, len: u32) callconv(.stdcall) void
+printnln: 
+	; prologue
+	push	ebp
+	mov		ebp, esp
+	; write to console
+	push	[ebp+12]
+	push	[ebp+8]
+	call	printn
+	push	str_newline
+	call	print
+	; epilogue
+.success:
+	pop		ebp
+	ret		8
+
+; print decimal-formatted signed 32-bit value
+; fn print_i32(val: u32) callconv(.stdcall) void
+print_i32:
+	; prologue
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	sub		esp, 12					; [10]u8 output + padding
+	; print
+	mov		eax, esp
+	push	eax
+	push	[ebp+8]
+	call	itoa
+	push	11
+	push	eax
+	call	printnln
+	; epilogue
+	add		esp, 12
+	pop		eax
+	pop		ebp
+	ret		4
+
+; print decimal-formatted unsigned 32-bit value
 ; fn print_u32(val: u32) callconv(.stdcall) void
 print_u32:
 	; prologue
 	push	ebp
 	mov		ebp, esp
 	push	eax
-	push	ebx
-	sub		esp, 8					; [8]u8		output buffer
+	sub		esp, 12					; [10]u8 output + padding
 	; print
-	mov		ebx, [ebp+8]			; val
-	lea		eax, [esp]
+	mov		eax, esp
 	push	eax
-	push	ebx
-	call	htoa
-	push	8
+	push	[ebp+8]
+	call	utoa
+	push	10
 	push	eax
-	call	print
-	push	1
-	push	str_newline
-	call	print
+	call	printnln
 	; epilogue
-	add		esp, 8
-	pop		ebx
+	add		esp, 12
 	pop		eax
 	pop		ebp
 	ret		4
 
-; convert 4-byte u32 value to hex string
-; fn htoa(val: u32, out: *[8]u8) callconv(.stdcall) void
-htoa:
+; print hex-formatted 32-bit value
+; fn print_h32(val: u32) callconv(.stdcall) void
+print_h32:
 	; prologue
 	push	ebp
 	mov		ebp, esp
 	push	eax
-	push	ebx
-	push	ecx
-	push	edx
-	; init
-	mov		ebx, [ebp+8]			; val
-	mov		eax, [ebp+12]			; out
-	mov		ecx, 8					; ecx = i
-.loop:
-	sub		ecx, 1
-	mov		edx, ebx				; val
-	and		edx, 0xF
-	add		edx, 0x30				; edx += '0' 
-	cmp		edx, 0x39
-	jle		.loop_out				; char < A
-	add		edx, 0x07				; edx += 'A'-':'
-.loop_out:
-	mov		byte [eax+ecx], dl		; out[i]
-	shr		ebx, 4					; val >> 4
-	cmp		ecx, 0
-	jg		.loop
+	sub		esp, 8					; [8]u8		output buffer
+	; print
+	mov		eax, esp
+	push	eax
+	push	[ebp+8]
+	call	htoa
+	push	8
+	push	eax
+	call	printnln
 	; epilogue
-	pop		edx
-	pop		ecx
-	pop		ebx
+	add		esp, 8
 	pop		eax
 	pop		ebp
-	; NOTE: not sure why the following crashes
-	;  add esp, 8
-	;  ret
-	ret		8
+	ret		4
 
-; fn strcpy(dst: [*]u8, src: [*:0]const u8) callconv(.stdcall) void
-strcpy:
+; print binary-formatted 32-bit value
+; fn print_b32(val: u32) callconv(.stdcall) void
+print_b32:
 	; prologue
 	push	ebp
 	mov		ebp, esp
 	push	eax
-	push	ebx
-	push	ecx
-	; copy
-	mov		eax, [ebp+8]
-	mov		ebx, [ebp+12]
-	mov		cl, 0
-.loop:
-	mov		cl, byte [ebx]
-	mov		byte [eax], cl
-	inc		eax
-	inc		ebx
-	cmp		cl, 0
-	jnz		.loop
+	sub		esp, 32					; [32]u8		output buffer
+	; print
+	mov		eax, esp
+	push	eax
+	push	[ebp+8]
+	call	btoa
+	push	32
+	push	eax
+	call	printnln
 	; epilogue
-	pop		ecx
-	pop		ebx
+	add		esp, 32
 	pop		eax
 	pop		ebp
-	ret		8
+	ret		4
 
 ; NOTE: expects vbuf to be zero-init'd
 ; TODO: maybe floodfill black by default in set_screen_size to clear screen?

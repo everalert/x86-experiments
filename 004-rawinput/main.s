@@ -9,6 +9,8 @@
 ; TODO: println (and update stuff that is implicitly/manually doing println)
 ; TODO: itoa
 ; TODO: btoa
+; TODO: console-based error printing
+; TODO: print error with errcode
 
 
 global _main
@@ -38,13 +40,23 @@ extern _LoadImageA@24				; user32.dll
 extern _RegisterClassExA@4			; user32.dll
 extern _AdjustWindowRect@12			; user32.dll
 extern _ValidateRect@8				; user32.dll
+extern _InvalidateRect@12			; user32.dll
 extern _BeginPaint@8				; user32.dll
 extern _EndPaint@8					; user32.dll
 extern _GetDC@4						; user32.dll
 extern _ReleaseDC@8					; user32.dll
 extern _GetClientRect@8				; user32.dll
 extern _GetSystemMetrics@4			; user32.dll
+extern _SetTimer@16					; user32.dll
+extern _CreateCompatibleDC@4		; gdi32.dll
+extern _DeleteDC@4					; gdi32.dll
+extern _GetObject@12				; gdi32.dll
+extern _DeleteObject@4				; gdi32.dll
+extern _SelectObject@8				; gdi32.dll
+extern _SetDIBits@28				; gdi32.dll
 extern _StretchDIBits@52			; gdi32.dll
+extern _StretchBlt@44				; gdi32.dll
+extern _CreateDIBSection@24			; gdi32.dll
 
 
 struc ScreenBuffer
@@ -53,6 +65,7 @@ struc ScreenBuffer
 	.BytesPerPixel					resd 1
 	.Pitch							resd 1
 	.Memory							resd 1
+	.hBitmap						resd 1
 	.Info							resb 0x40	; BITMAPINFOHEADER
 endstruc
 
@@ -139,6 +152,7 @@ section .data
 	WM_EXITSIZEMOVE					equ 0x0232
 	CS_VREDRAW						equ	0x0001
 	CS_HREDRAW						equ	0x0002
+	CS_OWNDC						equ	0x0020
 	WS_SHOWNORMAL					equ 1
 	WS_VISIBLE						equ 0x10000000
 	WS_OVERLAPPEDWINDOW				equ 0x00CF0000
@@ -189,7 +203,11 @@ section .data
 	str_AdjustWindowRect			db "AdjustWindowRect",0
 	str_GetDC						db "GetDC",0
 	str_ReleaseDC					db "ReleaseDC",0
+	str_DeleteObject				db "DeleteObject",0
 	str_StretchDIBits				db "StretchDIBits",0
+	str_StretchBlt					db "StretchBlt",0
+	str_CreateDIBSection			db "CreateDIBSection",0
+	str_BeginPaint					db "BeginPaint",0
 	str_get_hinst					db "Getting HINSTANCE",10,0
 	strlen_get_hinst				equ $-str_get_hinst
 	str_init_wndclass				db "Initializing Window Class",10,0
@@ -222,7 +240,6 @@ section .bss
 
 	ModuleHandle:					resd 1
 	StdHandle:						resd 1
-	DeviceContextHandle:			resd 1
 	WindowHandle:					resd 1
 	WindowMessage:					resd 1
 	WindowClass:					resb WNDCLASSEXA_size
@@ -268,7 +285,7 @@ initialize_window_class:
 	mov		ecx, [ModuleHandle]
 	mov		ebx, WNDCLASSEXA_size
 	mov		dword [WindowClass+WNDCLASSEXA.cbSize], ebx
-	mov		dword [WindowClass+WNDCLASSEXA.style], CS_HREDRAW|CS_VREDRAW
+	mov		dword [WindowClass+WNDCLASSEXA.style], CS_HREDRAW|CS_VREDRAW|CS_OWNDC
 	mov		dword [WindowClass+WNDCLASSEXA.lpfnWndProc], wndproc
 	mov		dword [WindowClass+WNDCLASSEXA.cbClsExtra], 0
 	mov		dword [WindowClass+WNDCLASSEXA.cbWndExtra], 0
@@ -367,14 +384,6 @@ create_window:
 	pop		ebx
 	mov		[WindowHandle], eax
 
-; FIXME: fix flickering/low "fps" that happens when the background color changes 
-;  in vbuf_draw_test. the actual draw calls are happening quickly, but somehow
-;  the actual graphics on the window are updated infrequently relative to the
-;  draw call speed, and skip showing some frames. lowering the sleep time seems
-;  to alleviate this somewhat, but appears to mostly speed up the whole process
-;  rather than actually draw more frames. however, calling in WM_PAINT shows that
-;  the window is capable of showing the frames quickly, so something may be
-;  missing from the main loop version.
 ; FIXME: remove white flash that appears before first frame renders; for some 
 ;  reason, switching from GetMessageA to PeekMessageA caused this to start
 ;  happening. is it because the window sleeps at the beginning? the white flash
@@ -401,9 +410,28 @@ app_loop:
 	inc		dword [FrameCount]
 	call	backbuffer_resize
 	call	vbuf_draw_test
+	; getdc
+	push	[WindowHandle]
+	call	_GetDC@4	
+	cmp		eax, 0
+	jnz		.getdc_ok
+	push	str_GetDC
+	call	show_error_and_exit
+.getdc_ok:
+	; render
+	push	eax							; DC from GetDC
 	call	backbuffer_render
-	push	7							; ~143fps
-	;push	16							; ~60fps
+	; releasedc
+	push	eax
+	push	[WindowHandle]
+	call	_ReleaseDC@8
+	cmp		eax, 0
+	jnz		.render_ok
+	push	str_ReleaseDC
+	call	show_error_and_exit
+.render_ok:
+	;push	7							; ~143fps
+	push	16							; ~60fps
 	call	_Sleep@4
 	jmp		.msg_loop
 
@@ -445,18 +473,24 @@ wndproc:
 	push	strlen_WM_PAINT
 	push	str_WM_PAINT
 	call	print
+	; prep
+	call	backbuffer_resize
+	call	vbuf_draw_test
 	; beginpaint
 	sub		esp, PAINTSTRUCT_size
 	mov		edx, esp
 	push	edx
 	push	[WindowHandle]
 	call	_BeginPaint@8
-	call	backbuffer_resize
-	call	vbuf_draw_test
+	cmp		eax, 0
+	jnz		.wm_paint_beginpaint_ok
+	push	str_BeginPaint
+	call	show_error_and_exit
 	; (re)draw
+.wm_paint_beginpaint_ok:
+	push	eax												; DC from BeginPaint
 	call	backbuffer_render
 	; endpaint
-	mov		edx, esp
 	push	edx
 	push	[WindowHandle]
 	call	_EndPaint@8
@@ -557,54 +591,53 @@ backbuffer_resize:
 	pop		ebp
 	ret
 
-; fn backbuffer_render() callconv(.stdcall) void
+; NOTE: might need to flush GDI at the top or bottom of this. apparently writing
+;  to the pixel buffer can cause an error if you don't
+; assumes the backbuffer is the same size as the client rect, i.e. set_screen_size
+;  has already been called in response to any window size change
+; fn backbuffer_render(hdc: HANDLE) callconv(.stdcall) void
 backbuffer_render:
 	push	ebp
 	mov		ebp, esp
 	push	eax
-	; getdc
-	push	[WindowHandle]
-	call	_GetDC@4	
-	cmp		eax, 0
-	jnz		.wm_paint_getdc_ok
-	push	str_GetDC
-	call	show_error_and_exit
-.wm_paint_getdc_ok:
-	mov		[DeviceContextHandle], eax
-	; stretchdibits
-  	push	ROP_SRCCOPY							; rop			
-  	push	DIB_RGB_COLORS						; iUsage
-  	lea		eax, [BackBuffer+ScreenBuffer.Info]
-  	push	eax									; *lpbmi
-  	push	[BackBuffer+ScreenBuffer.Memory]	; *lpBits
-  	push	[BackBuffer+ScreenBuffer.Height]	; SrcHeight
-  	push	[BackBuffer+ScreenBuffer.Width]		; SrcWidth
-  	push	0									; ySrc
+	push	ebx									; memory dc handle
+	push	ecx									; "old bitmap" handle
+	; memory dc
+	push	[ebp+8]
+	call	_CreateCompatibleDC@4				; FIXME: error handling
+	mov		ebx, eax
+	push	[BackBuffer+ScreenBuffer.hBitmap]
+	push	ebx
+	call	_SelectObject@8						; FIXME: error handling
+	mov		ecx, eax
+	push	ROP_SRCCOPY							; rop
+	push	[BackBuffer+ScreenBuffer.Height]	; hSrc
+	push	[BackBuffer+ScreenBuffer.Width]		; wSrc
+	push	0									; ySrc
 	push	0									; xSrc
-	push	[WindowSize+RECT.Bt]
-	push	[WindowSize+RECT.Rt]
-	push	0
-	push	0
-	push	[DeviceContextHandle]				; hdc
-	call	_StretchDIBits@52
-	cmp		eax, 0							; TODO: check for GDI_ERROR 
-	jg		.wm_paint_stretchdibits_ok
-	push	str_StretchDIBits
-	call	show_error_and_exit				; FIXME: simply crashes without showing the dialog?
-.wm_paint_stretchdibits_ok:
-	; releasedc
-	push	[DeviceContextHandle]
-	push	[WindowHandle]
-	call	_ReleaseDC@8
+	push	ebx									; hdcSrc
+	push	[WindowSize+RECT.Bt]				; hDest
+	push	[WindowSize+RECT.Rt]				; wDest
+	push	0                   				; yDest
+	push	0                   				; xDest
+	push	[ebp+8]								; hdcDest
+	call	_StretchBlt@44						; eax <- BOOL
 	cmp		eax, 0
-	jnz		.wm_paint_releasedc_ok
-	push	str_ReleaseDC
-	call	show_error_and_exit
-.wm_paint_releasedc_ok:
+	jne		.stretchdibits_ok					; TODO: check for GDIERROR
+	push	str_StretchBlt
+	call	show_error_and_exit					; WARN: might close without showing message, unsure
+.stretchdibits_ok:
+	push	ecx
+	push	ebx
+	call	_SelectObject@8						; FIXME: error handling
+	push	ebx
+	call	_DeleteDC@4							; FIXME: error handling
 	; epilogue
+	pop		ecx
+	pop		ebx
 	pop		eax
 	pop		ebp
-	ret
+	ret		4
 
 ; TODO: output formatted message containing error code
 ;  see: GetLastError, FormatMessageA
@@ -821,19 +854,18 @@ set_screen_size:
 	push	ecx
 	push	edx
 	; free existing memory if needed
-	mov		eax, [BackBuffer+ScreenBuffer.Memory]
+	mov		eax, [BackBuffer+ScreenBuffer.hBitmap]
 	cmp		eax, 0
 	jz		.free_ok
-	mov		eax, [BackBuffer+ScreenBuffer.Memory]
-  	push	MEM_RELEASE				; dwFreeType
-  	push	0						; dwSize,
-	push	eax						; lpAddress,
-	call	_VirtualFree@12
+	push	eax
+	call	_DeleteObject@4
 	cmp		eax, 0
 	jnz		.free_ok
-    push	str_VirtualFree
+    push	str_DeleteObject
 	call	show_error_and_exit
 .free_ok:
+	mov		[BackBuffer+ScreenBuffer.hBitmap], 0
+	mov		[BackBuffer+ScreenBuffer.Memory], 0
 	; fill in the buffer info and alloc new memory
 	mov		ecx, [ebp+12]
 	mov		edx, [ebp+16]
@@ -851,17 +883,19 @@ set_screen_size:
 	shl		ecx, 2											; bitmap size = Width * BytesPerPixel(4)
 	mov		dword [BackBuffer+ScreenBuffer.Pitch], ecx
 	mul		ecx, edx										; bitmap size = Width * Height * BytesPerPixel(4)
-	push	PAGE_READWRITE									; flProtect
-	push	MEM_COMMIT										; flAllocationType
-	push	ecx												; dwSize
-	push	0												; lpAddress
-	call	_VirtualAlloc@16
+	push	NULL											; offset
+	push	NULL											; hSection
+	push	BackBuffer+ScreenBuffer.Memory					; **ppvBits
+	push	DIB_RGB_COLORS									; usage
+	push	BackBuffer+ScreenBuffer.Info					; *pbmi
+	push	NULL											; hdc
+	call	_CreateDIBSection@24							; eax <- HBITMAP
 	cmp		eax, 0
 	jnz		.alloc_ok
-    push	str_VirtualAlloc
+    push	str_CreateDIBSection
 	call	show_error_and_exit
 .alloc_ok:
-	mov		[BackBuffer+ScreenBuffer.Memory], eax
+	mov		[BackBuffer+ScreenBuffer.hBitmap], eax
 	; epilogue
 	pop		edx
 	pop		ecx
@@ -888,8 +922,8 @@ vbuf_draw_test:
 	mov		[esp+4], eax
 	; clear
 	mov		ecx, dword [FrameCount]
-	and		ecx, 0x0000FF
-	or		ecx, 0x101010
+	and		ecx, 0x00003F
+	or		ecx, 0x101000
 	push	ecx
 	;push	0x101010				; 0xRRGGBB
 	call	vbuf_flood			
@@ -1418,5 +1452,4 @@ vbuf_draw_tri:
 	pop		eax
 	pop		ebp
 	ret		28
-
 

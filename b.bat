@@ -5,6 +5,7 @@ set "i=%1"
 :: NOTE: edit this if your win32 lib files are in a different directory
 set _LIBDIR_="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.19041.0\um\x86"
 
+:: TODO: /DEBUG to auto-launch sub-project through x32dbg
 :: TODO: /COPY to duplicate sub-project
 :: TODO: /CLEAN to remove sub-project build directory
 :: TODO: allow LIBDIR as input

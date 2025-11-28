@@ -120,6 +120,38 @@ utoa:
 	pop		ebp
 	ret		8
 
+; convert 8-bit value to binary string
+; fn btoa(val: u8, out: *[8]u8) callconv(.stdcall) void
+b8toa:
+	; prologue
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
+	push	ecx
+	push	edx
+	; init
+	mov		ebx, [ebp+8]			; val
+	mov		eax, [ebp+12]			; out
+	mov		ecx, 8					; ecx = i
+.loop:
+	dec		ecx
+	jl		.loop_end
+	mov		edx, ebx				; val
+	and		edx, 0x1
+	add		edx, 0x30				; edx += '0' 
+	mov		byte [eax+ecx], dl		; out[i]
+	shr		ebx, 1					; val >> 1
+	jmp		.loop
+.loop_end:
+	; epilogue
+	pop		edx
+	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
+	ret		8
+
 ; convert 32-bit value to binary string
 ; fn btoa(val: u32, out: *[32]u8) callconv(.stdcall) void
 btoa:

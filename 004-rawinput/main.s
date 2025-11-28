@@ -1,10 +1,22 @@
-; win32 rawinput
+; win32 rawinput (kinda)
 ; 2025/11/26
 ;
-; nasm -fwin32 main.s
-; GoLink /entry _main main.obj user32.dll kernel32.dll
-; main.exe
+; ./build.bat
+; ./run.bat
 
+
+; FIXME: on my machine, running code from hidparse.lib causes a runtime error due
+;  to windows inexplicably failing to find hidparse.sys, even though it's present
+;  under system32/drivers. maybe i'll come back and figure out what the issue is
+;  one day, but for now i'm just going to draw the raw data without parsing it
+;  via HID_CAPS etc.
+; for future reference:
+;  - https://github.com/MysteriousJ/Joystick-Input-Examples/blob/main/src/rawinput.cpp
+;  - https://www.codeproject.com/articles/Using-the-Raw-Input-API-to-Process-Joystick-Input
+;  - https://github.com/aholmes/XboxController/blob/master/RawInput/RawInput.cpp
+;  - https://ph3at.github.io/posts/Windows-Input/
+;  - https://learn.microsoft.com/en-us/windows/win32/inputdev/using-raw-input
+;  - https://www.gamedev.net/forums/topic/705064-rawinput-buffered-read-problem/
 
 ; TODO: console-based error printing
 ; TODO: print error with error code message
@@ -23,7 +35,7 @@ struc ScreenBuffer
 	.Pitch							resd 1
 	.Memory							resd 1
 	.hBitmap						resd 1
-	.Info							resb 0x40	; BITMAPINFOHEADER
+	.Info							resb BITMAPINFOHEADER_size
 endstruc
 
 
@@ -31,11 +43,13 @@ section .data
 	
 	DefaultW						equ 640
 	DefaultH						equ 360
+	bPrintInWndProc					equ 0
 
 	; our stuff
 	AppRunning						dd 1
     str_window_name					db "TestWindow",0
 	str_wndclass_name				db "TestWndClass",0
+	str_space						db 0x20,0
 	str_newline						db 10,0
 	str_error						db "Error!",0
 	str_errmsg_format				db "[ERROR] (00000000) ",0		; will be filled in and expanded by fn
@@ -60,6 +74,15 @@ section .bss
 
 	BackBuffer						resb ScreenBuffer_size
 	FrameCount						resd 1
+
+	RawInputDeviceCount				equ	2
+	RawInputScrBuf_Data				equ RawInputScrBuf+0
+	RawInputScrBuf_DeviceInfo		equ RawInputScrBuf+128
+	RawInputScrBuf_BufData			equ RawInputScrBuf+2048
+	RawInputReadsLimitPerFrame		equ 8
+	RawInputDevices					resb RawInputDeviceCount * RAWINPUTDEVICE_size
+	RawInputScrBuf					resb 4096
+	RawInputReadsBudget				resd 1
  
 
 section .text
@@ -69,7 +92,8 @@ _main:
 ; console init
 
 	push	StdHandle
-	call	init_stdio
+	call	stdio_init
+	call	stdio_test
 
 ; window init
 
@@ -193,22 +217,39 @@ create_window:
 	pop		ebx
 	mov		[WindowHandle], eax
 
+init_rawinput:
+	mov		ebx, [WindowHandle]
+	mov		eax, RawInputDevices
+	mov		word [eax+RAWINPUTDEVICE.usUsagePage], HID_USAGE_PAGE_GENERIC
+	mov		word [eax+RAWINPUTDEVICE.usUsage], HID_USAGE_GENERIC_GAMEPAD
+	mov		dword [eax+RAWINPUTDEVICE.dwFlags], RIDEV_INPUTSINK
+	mov		dword [eax+RAWINPUTDEVICE.hwndTarget], ebx
+	add		eax, RAWINPUTDEVICE_size
+	mov		word [eax+RAWINPUTDEVICE.usUsagePage], HID_USAGE_PAGE_GENERIC
+	mov		word [eax+RAWINPUTDEVICE.usUsage], HID_USAGE_GENERIC_JOYSTICK
+	mov		dword [eax+RAWINPUTDEVICE.dwFlags], RIDEV_INPUTSINK
+	mov		dword [eax+RAWINPUTDEVICE.hwndTarget], ebx
+	push	RAWINPUTDEVICE_size
+	push	RawInputDeviceCount
+	push	RawInputDevices
+	call	_RegisterRawInputDevices@12
+
 ; FIXME: remove white flash that appears before first frame renders; for some 
 ;  reason, switching from GetMessageA to PeekMessageA caused this to start
 ;  happening. is it because the window sleeps at the beginning? the white flash
 ;  is clearly shorter with a smaller sleep.
 app_loop:
-	;call	backbuffer_resize
-	;call	vbuf_draw_test
+	call	process_rawinput_buffer		; do this before messages so that wm_input doesn't drop any
 .msg_loop:
-	push	PM_REMOVE
-	push	0
-	push	0
-	push	[WindowHandle]				; NOTE: pushing 0 ok too
-	push	WindowMessage
+	push	PM_REMOVE					; wRemoveMsg
+	push	0							; wMsgFilterMax
+	push	0							; wMsgFilterMin
+	push	[WindowHandle]				; hWnd
+	push	WindowMessage				; lpMsg
 	call	_PeekMessageA@20
 	cmp		eax, 0
 	jng		.msg_loop_end
+.msg_loop_handle:
 	push	WindowMessage
 	call	_TranslateMessage@4
 	push	WindowMessage
@@ -218,7 +259,7 @@ app_loop:
 	je		exit
 	inc		dword [FrameCount]
 	call	backbuffer_resize
-	call	vbuf_draw_test
+	call	draw_rawinput
 	; getdc
 	push	[WindowHandle]
 	call	_GetDC@4	
@@ -239,10 +280,9 @@ app_loop:
 	push	str_ReleaseDC
 	call	show_error_and_exit
 .render_ok:
-	;push	7							; ~143fps
-	push	16							; ~60fps
+	push	16							; 16=~60fps, 7=~143fps
 	call	_Sleep@4
-	jmp		.msg_loop
+	jmp		app_loop
 
 ; end program
 	
@@ -265,25 +305,19 @@ wndproc:
 	; handle messages
 	cmp		ebx, WM_PAINT
 	jz		.wm_paint
-	;cmp	ebx, WM_SIZE
-	;jz		.wm_size
-	;cmp	ebx, WM_EXITSIZEMOVE
-	;jz		.wm_exitsizemove
 	cmp		ebx, WM_CLOSE
 	jz		.wm_close
 	cmp		ebx, WM_DESTROY
 	jz		.wm_destroy
-	;cmp	ebx, WM_ACTIVATEAPP
-	;jz		.wm_activateapp
 	cmp		ebx, WM_GETMINMAXINFO
 	jz		.wm_getminmaxinfo
 	jmp		.default
 .wm_paint:
 	push	str_WM_PAINT
-	call	print
+	call	wndproc_println
 	; prep
 	call	backbuffer_resize
-	call	vbuf_draw_test
+	call	draw_rawinput
 	; beginpaint
 	sub		esp, PAINTSTRUCT_size
 	mov		edx, esp
@@ -304,46 +338,28 @@ wndproc:
 	call	_EndPaint@8
 	add		esp, PAINTSTRUCT_size
 	jmp		.return_handled
-.wm_size:
-	push	str_WM_SIZE
-	call	print
-	jmp		.return_handled
-.wm_exitsizemove:
-	push	str_WM_EXITSIZEMOVE
-	call	print
-	jmp		.return_handled
 .wm_close:
 	push	str_WM_CLOSE
-	call	print
+	call	wndproc_println
 	mov		[AppRunning], 0
-	;jmp		exit					; not "proper" but the only way everything disappears instantly
 	jmp		.return_handled
 .wm_destroy:
 	push	str_WM_DESTROY
-	call	print
+	call	wndproc_println
 	mov		[AppRunning], 0
-	;jmp		exit					; not "proper" but the only way everything disappears instantly
-	jmp		.return_handled
-.wm_activateapp:
-	push	str_WM_ACTIVATEAPP
-	call	print
 	jmp		.return_handled
 .wm_getminmaxinfo:
 	push	str_WM_GETMINMAXINFO
-	call	print
+	call	wndproc_println
 	mov		ecx, [ebp+20]			; *MINMAXINFO
 	add		[ecx+MINMAXINFO.ptMinTrackSize+POINT.x], 16
 	add		[ecx+MINMAXINFO.ptMinTrackSize+POINT.y], 16
 	jmp		.return_handled
 .default:
-	mov		ecx, [ebp+20]
-	push	ecx
-	mov		ecx, [ebp+16]
-	push	ecx
-	mov		ecx, [ebp+12]
-	push	ecx
-	mov		ecx, [ebp+8]
-	push	ecx
+	push	[ebp+20]
+	push	[ebp+16]
+	push	[ebp+12]
+	push	[ebp+8]
 	call	_DefWindowProcA@16
 	jmp		.return					; eax should hold return value here
 	; epilogue
@@ -355,6 +371,275 @@ wndproc:
 	pop		ebx
 	pop		ebp
 	ret		16
+
+; conditionally println based on wndproc toggle
+; fn wndproc_print(str: [*:0]const u8) callconv(.stdcall) void
+wndproc_println:
+	%if	bPrintInWndProc
+	push	[esp+4]
+	call	println
+	%endif
+	ret		4
+
+; fn process_rawinput_buffer() callconv(.stdcall) void
+process_rawinput_buffer:
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
+	push	ecx
+	sub		esp, 4
+	; get raw input data
+	mov		ebx, esp
+	mov		[esp], 0				; GetRawInputData also uses this as input, first call will error if not 0
+	push	RAWINPUTHEADER_size		; cbSizeHeader
+	push	ebx						; pcbSize
+	push	NULL					; pData
+	call	_GetRawInputBuffer@12	; eax <- should be 0 for first call
+	cmp		eax, 0
+	jnz		.done
+.read_loop:
+	mov		eax, [esp]
+	mul		eax, RawInputReadsLimitPerFrame
+	mov		[esp], eax
+	mov		ebx, esp
+	push	RAWINPUTHEADER_size		; cbSizeHeader
+	push	ebx						; pcbSize
+	push	RawInputScrBuf_BufData	; pData
+	call	_GetRawInputBuffer@12	; eax <- number of inputs written to buffer
+	cmp		eax, 0
+	jle		.done
+	; process inputs
+	mov		ebx, RawInputScrBuf_BufData
+.input_loop:
+	dec		eax
+	jl		.read_loop
+	mov		ecx, [ebx+RAWINPUTHEADER.dwSize]
+	push	ecx						; len
+	push	ebx						; src
+	push	RawInputScrBuf_Data		; dst
+	call	memcpy
+	add		ebx, ecx				; step must be aligned, values below sized for 32bit
+	add		ebx, 3
+	and		ebx, 0xFFFFFFFC			
+	jmp		.input_loop
+.done:
+	; epilogue
+	add		esp, 4
+	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
+	ret
+
+; NOTE: sample/unfinished code that would be used in WM_INPUT directly; keeping
+;  around as a reference (see HidP note at top)
+; fn process_rawinput_message(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) callconv(.stdcall) void
+process_rawinput_message:
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
+	push	ecx
+	push	edx
+	sub		esp, 8+HIDP_CAPS_size
+	; get raw input data
+	mov		ebx, esp
+	mov		[esp], 0				; GetRawInputData also uses this as input, first call will error if not 0
+	push	RAWINPUTHEADER_size		; cbSizeHeader
+	push	ebx						; pcbSize
+	push	NULL					; pData
+	push	RID_INPUT				; uiCommand
+	push	[ebp+20]				; hRawInput
+	call	_GetRawInputData@20		; eax <- num bytes written to pData
+	;push	dword [ebx]
+	;call	print_u32
+	mov		ebx, esp
+	push	RAWINPUTHEADER_size		; cbSizeHeader
+	push	ebx						; pcbSize
+	push	RawInputScrBuf_Data		; pData
+	push	RID_INPUT				; uiCommand
+	push	[ebp+20]				; hRawInput
+	call	_GetRawInputData@20		; need 2nd call, because 1st call doesn't know how much to try and read
+	cmp		eax, 0
+	jle		.done
+	;push	8
+	;push	eax
+	;push	RawInputScrBuf_Data
+	;call	print_hexdump
+	; get raw input device info
+	push	esp
+	push	0
+	push	RIDI_PREPARSEDDATA
+	push	dword [RawInputScrBuf_Data+RAWINPUTHEADER.hDevice]
+	call	_GetRawInputDeviceInfoA@16
+	;push	dword [ebx]
+	;call	print_u32
+	push	esp
+	push	RawInputScrBuf_DeviceInfo
+	push	RIDI_PREPARSEDDATA
+	push	dword [RawInputScrBuf_Data+RAWINPUTHEADER.hDevice]
+	call	_GetRawInputDeviceInfoA@16
+	cmp		eax, 0
+	jle		.done
+	;push	8
+	;push	eax
+	;push	RawInputScrBuf_DeviceInfo
+	;call	print_hexdump
+.done:
+	; NOTE: this is where you would start processing through HidP-stuff
+	; epilogue
+	add		esp, 8+HIDP_CAPS_size
+	pop		edx
+	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
+	ret		16
+
+; TODO: clear background, parse header in RawInputScrBuf_Data, draw with vbuf_draw_bindump
+; fn draw_rawinput() callconv(.stdcall) void
+draw_rawinput:
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
+	push	ecx
+	push	edx
+	sub		esp, 8
+	; draw
+	mov		eax, [BackBuffer+ScreenBuffer.Width]
+	shr		eax, 1
+	sub		eax, DrawBinDump_StepW*2-4
+	mov		[esp+0], eax
+	mov		eax, [BackBuffer+ScreenBuffer.Height]
+	shr		eax, 1
+	sub		eax, DrawBinDump_StepH*6-2
+	mov		[esp+4], eax
+	; clear
+	mov		ecx, dword [FrameCount]
+	and		ecx, 0x00003F
+	or		ecx, 0x101000
+	push	ecx
+	;push	0x101010				; 0xRRGGBB
+	call	vbuf_flood			
+	; bindump
+	mov		eax, esp
+	push	4
+	push	48
+	push	RawInputScrBuf_Data+RAWINPUTHEADER_size
+	push	[eax+4]
+	push	[eax+0]
+	push	0xFFFF00
+	call	vbuf_draw_bindump
+	; epilogue
+	add		esp, 8
+	pop		edx
+	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
+	ret
+
+DrawBinDump_StepW equ DrawB8_StepWAll+8
+DrawBinDump_StepH equ DrawB8_H+4
+
+; fn vbuf_draw_bindump(col: u32, x: i32, y:i32, data: [*]const u8, len: u32, row_sz: u32) callconv(.stdcall) void
+vbuf_draw_bindump:
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
+	push	ecx
+	push	edx
+	sub		esp, 12
+	; work
+	mov		edx, esp
+	mov		eax, [ebp+12]			; x
+	mov		[edx+0], eax
+	mov		eax, [ebp+16]			; y
+	mov		[edx+4], eax
+	mov		eax, dword DrawBinDump_StepW
+	mul		eax, [ebp+28]			; step_w_all
+	mov		[edx+8], eax
+	mov		ebx, [ebp+20]			; data
+.data:
+	cmp		dword [ebp+24], 0
+	jle		.data_done
+	mov		ecx, dword [ebp+28]		; row_sz
+.data_inner:
+	dec		ecx
+	jl		.data_inner_done
+	push	[ebx]					; val
+	push	[edx+4]					; y
+	push	[edx+0]					; x
+	push	[ebp+8]					; col
+	call	vbuf_draw_b8
+	add		dword [edx+0], DrawBinDump_StepW
+	inc		ebx
+	dec		dword [ebp+24]
+	jg		.data_inner
+.data_inner_done:
+	mov		eax, [edx+8]
+	sub		dword [edx+0], eax
+	add		dword [edx+4], DrawBinDump_StepH
+	jmp		.data
+.data_done:
+	; epilogue
+	add		esp, 12
+	pop		edx
+	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
+	ret		24
+
+DrawB8_W equ 8
+DrawB8_H equ 16
+DrawB8_StepW equ DrawB8_W+4
+DrawB8_StepWAll equ DrawB8_StepW*8
+
+; fn vbuf_draw_b8(col: u32, x: i32, y:i32, val: u8) callconv(.stdcall) void
+vbuf_draw_b8:
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
+	push	ecx
+	push	edx
+	; work
+	mov		ebx, [ebp+20]			; val
+	mov		eax, [ebp+12]			; x
+	add		eax, DrawB8_StepWAll
+	mov		ecx, 8					; ecx = i
+.loop:
+	sub		eax, DrawB8_StepW		; x += 6
+	dec		ecx
+	jl		.loop_end
+	push	DrawB8_H				; h
+	push	DrawB8_W				; w
+	push	dword [ebp+16]			; y
+	push	eax						; x
+	push	dword [ebp+8]			; col
+	mov		edx, ebx
+	and		edx, 0x1
+	jnz		.draw_fill
+	call	vbuf_draw_rect
+	jmp		.draw_ok
+.draw_fill:
+	call	vbuf_draw_rect_fill
+.draw_ok:
+	shr		ebx, 1					; val >> 1
+	jmp		.loop
+.loop_end:
+	; epilogue
+	pop		edx
+	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
+	ret		16
+
 
 ; fn backbuffer_resize() callconv(.stdcall) void
 backbuffer_resize:
@@ -484,9 +769,20 @@ show_error_and_exit:
 	pop		ebp
 	ret		4
 
+; dump any print testing stuff here
+; fn stdio_test() callconv(.stdcall) void
+stdio_test:
+	;push	RAWINPUT.data
+	;call	print_h32
+	;push	RAWINPUT.data.mouse
+	;call	print_h32
+	;push	RAWHID_size
+	;call	print_u32
+	ret
+
 ; attach console and get std i/o handle
-; fn init_stdio(handle: *HANDLE) callconv(.stdcall) void
-init_stdio:
+; fn stdio_init(handle: *HANDLE) callconv(.stdcall) void
+stdio_init:
 	; prologue
 	push	ebp
 	mov		ebp, esp
@@ -524,6 +820,7 @@ print:
 	push	ebp
 	mov		ebp, esp
 	push	eax
+	push	ecx
 	push	edx
 	; write to console
 	lea		edx, [esp-4]
@@ -541,7 +838,8 @@ print:
 	call	show_error_and_exit
 	; epilogue
 .success:
-	pop		ebx
+	pop		edx
+	pop		ecx
 	pop		eax
 	pop		ebp
 	ret		4
@@ -553,8 +851,8 @@ printn:
 	push	ebp
 	mov		ebp, esp
 	push	eax
-	push	ecx
 	push	ebx
+	push	ecx
 	push	edx
 	sub		esp, 4
 	; write to console
@@ -575,8 +873,8 @@ printn:
 .success:
 	add		esp, 4
 	pop		edx
-	pop		ebx
 	pop		ecx
+	pop		ebx
 	pop		eax
 	pop		ebp
 	ret		8
@@ -701,6 +999,98 @@ print_b32:
 	pop		eax
 	pop		ebp
 	ret		4
+
+; fn print_hexdump(data: [*]const u8, len: u32, row_size: u32) callconv(.stdcall) void
+print_hexdump:
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
+	push	ecx
+	push	edx
+	sub		esp, 8
+	; work
+	mov		eax, [ebp+12]
+	add		eax, [ebp+8]
+	mov		ebx, [ebp+8]
+	mov		edx, esp
+.data:
+	cmp		ebx, eax
+	jge		.data_done
+	mov		ecx, [ebp+16]
+.data_inner:
+	dec		ecx
+	jl		.data_inner_done
+	push	edx
+	push	[ebx]
+	call	htoa
+	push	8
+	push	edx
+	call	printn
+	push	str_space
+	call	print
+	add		ebx, 4
+	cmp		ebx, eax
+	jl		.data_inner
+.data_inner_done:
+	push	str_newline
+	call	print
+	jmp		.data
+.data_done:
+	; epilogue
+	add		esp, 8
+	pop		edx
+	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
+	ret		12
+
+; fn print_bindump(data: [*]const u8, len: u32, row_size: u32) callconv(.stdcall) void
+print_bindump:
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
+	push	ecx
+	push	edx
+	sub		esp, 8
+	; work
+	mov		eax, [ebp+12]
+	add		eax, [ebp+8]
+	mov		ebx, [ebp+8]
+	mov		edx, esp
+.data:
+	cmp		ebx, eax
+	jge		.data_done
+	mov		ecx, [ebp+16]
+.data_inner:
+	dec		ecx
+	jl		.data_inner_done
+	push	edx
+	push	[ebx]
+	call	b8toa
+	push	8
+	push	edx
+	call	printn
+	push	str_space
+	call	print
+	inc		ebx
+	cmp		ebx, eax
+	jl		.data_inner
+.data_inner_done:
+	push	str_newline
+	call	print
+	jmp		.data
+.data_done:
+	; epilogue
+	add		esp, 8
+	pop		edx
+	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
+	ret		12
 
 ; NOTE: expects vbuf to be zero-init'd
 ; TODO: maybe floodfill black by default in set_screen_size to clear screen?
@@ -861,6 +1251,20 @@ vbuf_draw_test:
 	push	ecx
 	push	0xFFFFFF
 	call	vbuf_draw_pixel
+	; b8
+	push	0xAA
+	push	32
+	push	16
+	push	0xFFFF00
+	call	vbuf_draw_b8
+	; bindump
+	push	4
+	push	8
+	push	str_errmsg_format
+	push	48
+	push	16
+	push	0xFFFF00
+	call	vbuf_draw_bindump
 	; epilogue
 	add		esp, 8
 	pop		edx
@@ -1314,3 +1718,32 @@ vbuf_draw_tri:
 	pop		ebp
 	ret		28
 
+; FIXME: can probably do this with dedicated instructions, since we don't need
+;  to check for an exit case
+; fn memcpy(dst: [*]u8, src: [*]const u8, len: u32) callconv(.stdcall) void
+memcpy:
+	; prologue
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
+	push	ecx
+	push	edx
+	; copy
+	mov		eax, [ebp+8]
+	mov		ebx, [ebp+12]
+	mov		edx, [ebp+16]
+.loop:
+	mov		cl, byte [ebx]
+	mov		byte [eax], cl
+	inc		eax
+	inc		ebx
+	dec		edx
+	jg		.loop
+	; epilogue
+	pop		edx
+	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
+	ret		12

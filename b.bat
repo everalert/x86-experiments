@@ -3,7 +3,8 @@
 set "i=%1"
 
 :: NOTE: edit this if your win32 lib files are in a different directory
-set _LIBDIR_="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.19041.0\um\x86"
+set _LIBDIR_UM_="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.22621.0\um\x86"
+set _LIBDIR_KM_="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.22621.0\km\x86"
 
 :: TODO: /DEBUG to auto-launch sub-project through x32dbg
 :: TODO: /COPY to duplicate sub-project
@@ -39,7 +40,7 @@ if not defined _M_ (
 pushd %_PROJECT_%
 if defined _B_ (
 	if not exist ".build" mkdir ".build"
-	call "./build.bat" /LIBDIR %_LIBDIR_% %_FWDARGS_%
+	call "./build.bat" /LIBDIR_UM %_LIBDIR_UM_% /LIBDIR_KM %_LIBDIR_KM_% %_FWDARGS_%
 )
 if defined _R_ (
 	if not exist ".build" echo .build directory not found, run with /BUILD first

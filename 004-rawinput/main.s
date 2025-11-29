@@ -721,33 +721,17 @@ show_error_and_exit:
 	pop		ebp
 	ret		4
 
-; FIXME: can probably do this with dedicated instructions, since we don't need
-;  to check for an exit case
 ; fn memcpy(dst: [*]u8, src: [*]const u8, len: u32) callconv(.stdcall) void
 memcpy:
-	; prologue
-	push	ebp
-	mov		ebp, esp
-	push	eax
-	push	ebx
+	push	esi
+	push	edi
 	push	ecx
-	push	edx
-	; copy
-	mov		eax, [ebp+8]
-	mov		ebx, [ebp+12]
-	mov		edx, [ebp+16]
-.loop:
-	mov		cl, byte [ebx]
-	mov		byte [eax], cl
-	inc		eax
-	inc		ebx
-	dec		edx
-	jg		.loop
-	; epilogue
-	pop		edx
+	mov		edi, [esp+16]
+	mov		esi, [esp+20]
+	mov		ecx, [esp+24]
+	rep		movsb
 	pop		ecx
-	pop		ebx
-	pop		eax
-	pop		ebp
+	pop		edi
+	pop		esi
 	ret		12
 

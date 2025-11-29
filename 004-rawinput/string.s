@@ -36,21 +36,20 @@ strcpy:
 	pop		ebp
 	ret		8
 
+; FIXME: repne scas
 ; fn strlen(buf: [*:0]const u8) callconv(.stdcall) u32
 strlen:
-	push	ebp
-	mov		ebp, esp
-	push	ebx
+	push	edi
+	push	ecx
 	xor		eax, eax
-	mov		ebx, [ebp+8]
-.count:
-	cmp		byte [ebx+eax], 0
-	jz		.done
-	inc		eax
-	jmp		.count
-.done:
-	pop		ebx
-	pop		ebp
+	mov		edi, [esp+12]
+	mov		ecx, 0xFFFFFFFF
+	repne	scasb
+	not		ecx
+	dec		ecx
+	mov		eax, ecx
+	pop		ecx
+	pop		edi
 	ret		4
 
 ; convert signed 32-bit value to decimal string

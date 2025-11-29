@@ -592,10 +592,12 @@ vbuf_draw_tri:
 	pop		ebp
 	ret		28
 
-DrawBinDump_StepW equ DrawB8_StepWAll+8
-DrawBinDump_StepH equ DrawB8_H+4
-
-; fn vbuf_draw_bindump(col: u32, x: i32, y:i32, data: [*]const u8, len: u32, row_sz: u32) callconv(.stdcall) void
+DrawBinDump_GapX	equ 8
+DrawBinDump_GapY	equ 4
+DrawBinDump_StepW	equ DrawB8_StepWAll+DrawBinDump_GapX
+DrawBinDump_StepH 	equ DrawB8_H+DrawBinDump_GapY
+; stdcall
+; fn vbuf_draw_bindump(col: u32, x: i32, y:i32, data: [*]const u8, len: u32, row_sz: u32) void
 vbuf_draw_bindump:
 	push	ebp
 	mov		ebp, esp
@@ -645,12 +647,13 @@ vbuf_draw_bindump:
 	pop		ebp
 	ret		24
 
-DrawB8_W equ 8
-DrawB8_H equ 16
-DrawB8_StepW equ DrawB8_W+4
-DrawB8_StepWAll equ DrawB8_StepW*8
-
-; fn vbuf_draw_b8(col: u32, x: i32, y:i32, val: u8) callconv(.stdcall) void
+DrawB8_Gap			equ 4
+DrawB8_W			equ 8
+DrawB8_H			equ 16
+DrawB8_StepW		equ DrawB8_W+DrawB8_Gap
+DrawB8_StepWAll 	equ DrawB8_StepW*8
+; stdcall
+; fn vbuf_draw_b8(col: u32, x: i32, y:i32, val: u8) void
 vbuf_draw_b8:
 	push	ebp
 	mov		ebp, esp

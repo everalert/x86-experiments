@@ -486,8 +486,10 @@ process_rawinput_message:
 	pop		ebp
 	ret		16
 
-; TODO: clear background, parse header in RawInputScrBuf_Data, draw with vbuf_draw_bindump
-; fn draw_rawinput() callconv(.stdcall) void
+DrawRawInput_OffX	equ DrawBinDump_StepW*2-DrawB8_Gap*3/2
+DrawRawInput_OffY	equ DrawBinDump_StepH*6-DrawBinDump_GapY/2
+; stdcall
+; fn draw_rawinput() void
 draw_rawinput:
 	push	ebp
 	mov		ebp, esp
@@ -499,11 +501,11 @@ draw_rawinput:
 	; draw
 	mov		eax, [BackBuffer+ScreenBuffer.Width]
 	shr		eax, 1
-	sub		eax, DrawBinDump_StepW*2-4
+	sub		eax, DrawRawInput_OffX
 	mov		[esp+0], eax
 	mov		eax, [BackBuffer+ScreenBuffer.Height]
 	shr		eax, 1
-	sub		eax, DrawBinDump_StepH*6-2
+	sub		eax, DrawRawInput_OffY
 	mov		[esp+4], eax
 	; clear
 	mov		ecx, dword [FrameCount]

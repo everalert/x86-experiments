@@ -21,6 +21,7 @@ set _FWDARGS_=
 		) else if /i "%~1" == "/002" ( set _PROJECT_=002-window
 		) else if /i "%~1" == "/003" ( set _PROJECT_=003-drawing
 		) else if /i "%~1" == "/004" ( set _PROJECT_=004-rawinput
+		) else if /i "%~1" == "/005" ( set _PROJECT_=005-drawtext
 		)
 	) else set _FWDARGS_=%_FWDARGS_% %1
 	set _=

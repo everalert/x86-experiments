@@ -15,6 +15,11 @@ struc ScreenBuffer
 	.Info							resb BITMAPINFOHEADER_size
 endstruc
 
+struc ScreenSize
+	.W								resw 1
+	.H								resw 1
+endstruc
+
 
 section .data
 	

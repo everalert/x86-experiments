@@ -14,7 +14,10 @@ global _main
 %include "win32.s"
 %include "string.s"
 %include "stdio.s"
+%include "math.s"
 %include "vbuf.s"
+%include "vbuf_sprite.s"
+%include "vbuf_text.s"
 
 	
 DefaultW				equ 640
@@ -24,8 +27,13 @@ bPrintInWndProc			equ 0
 
 section .data
 
-	; our stuff
 	AppRunning						dd 1
+	FrameTime						dq 1.6666666666666666435370e-02
+
+	WavyTextTimescale				dd 1.5
+	WavyTextFrequency				dd 0.2
+	WavyTextOffset					dd 2.0
+
     str_window_name					db "TestWindow",0
 	str_wndclass_name				db "TestWndClass",0
 	str_error						db "Error!",0
@@ -39,8 +47,16 @@ section .data
 	str_show_window					db "Showing Window",10,0
 	str_bbuf_render					db "BackBuffer Render",10,0
 
+	str_gale						db "GALE WAS HERE!",0
+	str_dom							db "DOM IS A LOSER!",0
+	str_super						db "SUPERCALIFRAGILISTICEXPIALIDOCIOUS",0
+
 
 section .bss
+
+	AppDuration						resq 1
+	AppDuration32					resd 1
+	AppTimerCircle					resd 1
 
 	ModuleHandle:					resd 1
 	StdHandle:						resd 1
@@ -204,7 +220,7 @@ app_loop:
 .msg_loop_end:
 	cmp		[AppRunning], 0
 	je		exit
-	inc		dword [FrameCount]
+	call	app_inc_timer
 	call	backbuffer_resize
 	call	backbuffer_draw
 	; getdc
@@ -238,6 +254,20 @@ exit:
     call	_ExitProcess@4 
 
 ; functions
+
+; stdcall
+; fn app_inc_timer() void
+app_inc_timer:
+	inc		dword [FrameCount]
+	fld		qword [AppDuration]
+	fadd	qword [FrameTime]
+	fst		qword [AppDuration]
+	fst		dword [AppDuration32]
+	; misc
+	fmul	dword [f32_tau]
+	fstp	dword [AppTimerCircle]
+	; epilogue
+	ret
 
 ; stdcall
 ; LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -365,8 +395,23 @@ backbuffer_resize:
 	pop		ebp
 	ret
 
+; fn backbuffer_draw() callconv(.stdcall) void
 backbuffer_draw:
+	push	ebp
+	mov		ebp, esp
+	push	eax
+	push	ebx
 	push	ecx
+	push	edx
+	sub		esp, 8
+	mov		edx, esp
+	; get midpoint
+	mov		eax, [BackBuffer+ScreenBuffer.Width]
+	shr		eax, 1
+	mov		[esp+0], eax
+	mov		eax, [BackBuffer+ScreenBuffer.Height]
+	shr		eax, 1
+	mov		[esp+4], eax
 	; clear
 	mov		ecx, dword [FrameCount]
 	and		ecx, dword 0x00003F				; 0xRRGGBB
@@ -374,8 +419,57 @@ backbuffer_draw:
 	add		ecx, dword 0xF
 	push	ecx
 	call	vbuf_flood			
+	; test drawing
+	;call	vbuf_test_draw_text
+	; funny xd title
+	push	FontTitle
+	push	str_gale
+	push	FontTitle
+	push	str_gale
+	call	vbuf_measure_text
+	mov		bx, word [edx+4]
+	mov		ecx, eax
+	shr		ecx, 16
+	sub		bx, cx
+	push	bx					; h
+	mov		bx, word [edx+0]
+	mov		ecx, eax
+	shr		cx, 1
+	sub		bx, cx
+	push	bx					; w
+	push	0xD0D0FF
+	call	vbuf_draw_text
+	; funny xd body
+	push	[AppTimerCircle]
+	push	[WavyTextTimescale]
+	call	f32mul
+	push	[WavyTextFrequency]				; frequency
+	push	[WavyTextOffset]				; amplitude
+	push	eax								; t
+	push	FontBody
+	push	str_dom
+	push	FontBody
+	push	str_dom
+	call	vbuf_measure_text
+	mov		bx, word [edx+4]
+	mov		ecx, eax
+	shr		ecx, 17
+	add		bx, cx
+	push	bx					; h
+	mov		bx, word [edx+0]
+	mov		ecx, eax
+	shr		cx, 1
+	sub		bx, cx
+	push	bx					; w
+	push	0xB0B0FF
+	call	vbuf_draw_text_wave
 	; epilogue
+	add		esp, 8
+	pop		edx
 	pop		ecx
+	pop		ebx
+	pop		eax
+	pop		ebp
 	ret
 
 ; NOTE: might need to flush GDI at the top or bottom of this. apparently writing

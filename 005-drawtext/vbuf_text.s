@@ -2,9 +2,6 @@
 %define _VBUF_TEXT_S_
 
 
-; FIXME: might be using the wrong version of the fonts, they seem to be shifted
-;  to the wrong side of the byte? either way, misalignment with drawn bbox after
-;  measuring with fixed measurements
 ; FIXME: go back and convert all the draw functions to actually use i16 as input
 ;  for x/y/w/h (or convert them all to i32), to make everything consistent
 
@@ -40,24 +37,25 @@ section .data
 	GlyphsBody			incbin "fbody.bin"
 
 	FontTitle:
-		istruc ScreenFont
-			at ScreenFont.GlyphW,		db 7
-			at ScreenFont.GlyphH,		db 12
-			at ScreenFont.AdvanceX,		db 8
-			at ScreenFont.AdvanceY,		db 16
-			at ScreenFont.pGlyphs,		dd GlyphsTitle
-		iend
+	istruc ScreenFont
+		at ScreenFont.GlyphW,		db 7
+		at ScreenFont.GlyphH,		db 12
+		at ScreenFont.AdvanceX,		db 8
+		at ScreenFont.AdvanceY,		db 16
+		at ScreenFont.pGlyphs,		dd GlyphsTitle
+	iend
+
 	FontBody:
-		istruc ScreenFont
-			at ScreenFont.GlyphW,		db 6
-			at ScreenFont.GlyphH,		db 8
-			at ScreenFont.AdvanceX,		db 7
-			at ScreenFont.AdvanceY,		db 12
-			at ScreenFont.pGlyphs,		dd GlyphsBody
-		iend
+	istruc ScreenFont
+		at ScreenFont.GlyphW,		db 6
+		at ScreenFont.GlyphH,		db 8
+		at ScreenFont.AdvanceX,		db 7
+		at ScreenFont.AdvanceY,		db 12
+		at ScreenFont.pGlyphs,		dd GlyphsBody
+	iend
 	
-	vbuftest_strtitle		db "Test Title String!",10,"...with a newline~~~",10,"shorty L3",0
-	vbuftest_strbody		db "Test Body String!",10, "...with a newline~~~ yep xd",0
+	vbuftest_strtitle		db "Test Title String!",0x0A,0xB0,"...with a newline~~~",0xDF,0x0A,"shorty L3",0
+	vbuftest_strbody		db "Test Body String!",0x0A,0xB0, "...with a newline~~~ yep xd",0
 
 
 section .text

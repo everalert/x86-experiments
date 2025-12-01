@@ -38,7 +38,7 @@ vbuf_sprite_1b8:
 	mov		al, byte [eax]
 	mov		cl, 8
 	mov		bx, word [ebp+12]		; x
-	add		bx, 8
+	add		bx, 7					; last pixel is x+w(8)-1
 .iloop:
 	dec		cl
 	jl		.iloop_end

@@ -70,7 +70,7 @@ vbuf_test_draw_text:
 	push	word 16
 	push	word 16
 	push	0xFFFFFF
-	call	vbuf_sprite_1b8
+	call	vbuf_draw_sprite_1b8
 	; test char
 	push	0					; flags
 	push	FontBody
@@ -170,7 +170,7 @@ vbuf_draw_char:
 	push	word [ebp+14]			; y
 	push	word [ebp+12]			; x
 	push	[ebp+8]					; color
-	call	vbuf_sprite_1b8
+	call	vbuf_draw_sprite_1b8
 .draw_done:
 	; build ScreenGlyphAdvance
 	mov		al, byte [edx+ScreenFont.AdvanceX]

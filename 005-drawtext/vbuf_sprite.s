@@ -16,8 +16,8 @@ section .text
 
 ; draw 8px-wide 1-bit alpha sprite. each data byte is one row of 8 pixels, drawn
 ;  in MSB-first order (i.e. the order when written in 0bNNNNNNNN notation).
-; fn vbuf_sprite_1b8(color: u32, x: i16, y: i16, h: u8, data: [*]const u8) callconv(.stdcall) void
-vbuf_sprite_1b8:
+; fn vbuf_draw_sprite_1b8(color: u32, x: i16, y: i16, h: u8, data: [*]const u8) callconv(.stdcall) void
+vbuf_draw_sprite_1b8:
 	push	ebp
 	mov		ebp, esp
 	push	eax

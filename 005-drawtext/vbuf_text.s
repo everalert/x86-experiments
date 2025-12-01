@@ -2,9 +2,9 @@
 %define _VBUF_TEXT_S_
 
 
-; FIXME: fix vbuf_measure_text reporing slightly-off width. currently, the width
-;  is based entirely on ScreenFont.AdvanceX (propagated from vbuf_draw_char), so
-;  the last iteration needs to be adjusted to use ScreenFont.GlyphW instead.
+; FIXME: might be using the wrong version of the fonts, they seem to be shifted
+;  to the wrong side of the byte? either way, misalignment with drawn bbox after
+;  measuring with fixed measurements
 ; FIXME: go back and convert all the draw functions to actually use i16 as input
 ;  for x/y/w/h (or convert them all to i32), to make everything consistent
 
@@ -56,10 +56,8 @@ section .data
 			at ScreenFont.pGlyphs,		dd GlyphsBody
 		iend
 	
-	str_test_title:		db "Test Title String!",10,
-						db "...with a newline~~~",0
-	str_test_body:		db "Test Body String!",10,
-						db "...with a newline~~~",0
+	vbuftest_strtitle		db "Test Title String!",10,"...with a newline~~~",10,"shorty L3",0
+	vbuftest_strbody		db "Test Body String!",10, "...with a newline~~~ yep xd",0
 
 
 section .text
@@ -85,7 +83,7 @@ vbuf_test_draw_text:
 	call	vbuf_draw_char
 	; test string (body)
 	push	FontBody
-	push	str_test_body
+	push	vbuftest_strbody
 	call	vbuf_measure_text
 	mov		ebx, eax
 	shr		ebx, 16
@@ -99,14 +97,14 @@ vbuf_test_draw_text:
 	push	0x8080FF			; color
 	call	vbuf_draw_rect
 	push	FontBody
-	push	str_test_body
+	push	vbuftest_strbody
 	push	word 32
 	push	word 16
 	push	0xB0B0FF
 	call	vbuf_draw_text
 	; test string (title)
 	push	FontTitle
-	push	str_test_title
+	push	vbuftest_strtitle
 	call	vbuf_measure_text
 	mov		ebx, eax
 	shr		ebx, 16
@@ -120,7 +118,7 @@ vbuf_test_draw_text:
 	push	0x8080FF			; color
 	call	vbuf_draw_rect
 	push	FontTitle
-	push	str_test_title
+	push	vbuftest_strtitle
 	push	word 64
 	push	word 16
 	push	0xB0B0FF
@@ -354,12 +352,23 @@ vbuf_measure_text:
 .oloop_end:
 	pop		eax
 	; finalize ScreenSize
+	xor		edx, edx
 	cmp		di, 0	; if last row actually drew a character, add glyph h to max size
 	jle		.final_y_ok
-	xor		edx, edx
 	mov		dl, byte [ecx+ScreenFont.GlyphH]
 	add		word [ebx+4+ScreenSize.H], dx
+	jmp		.final_x	; if we had to do this, we already know the output w is > 0
 .final_y_ok:
+	cmp		word [ebx+4+ScreenSize.W], 0	
+	jle		.final_x_ok
+.final_x:
+	mov		di, word [ebx+4+ScreenSize.W]
+	mov		dl, byte [ecx+ScreenFont.AdvanceX]
+	sub		di, dx
+	mov		dl, byte [ecx+ScreenFont.GlyphW]
+	add		di, dx
+	mov		word [ebx+4+ScreenSize.W], di
+.final_x_ok:
 	mov		eax, [ebx+4]		; eax <- ScreenSize
 	; epilogue
 	add		esp, 8

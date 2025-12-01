@@ -2,6 +2,10 @@
 %define	_STDIO_S_
 
 
+; FIXME: rename numeric print helpers (e.g. print_h32) to reflect the fact that
+;  they implicitly print a newline
+
+
 %include "win32.s"
 %include "string.s"
 

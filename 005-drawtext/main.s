@@ -5,6 +5,9 @@
 ; ./run.bat
 
 
+; FIXME: homogenize vbuf api wrt register size of x/y/w/h arguments. shapes take 
+;  32-bit, while the sprite/text functions take 16-bit. leaning toward 16-bit for 
+;  now but not decided.
 ; TODO: console-based error printing
 ; TODO: print error with error code message
 
@@ -22,6 +25,7 @@ global _main
 	
 DefaultW				equ 640
 DefaultH				equ 360
+bPrintDebug				equ 0
 bPrintInWndProc			equ 0
 
 
@@ -33,7 +37,6 @@ section .data
 	WavyTextTimescale				dd 1.5
 	WavyTextFrequency				dd 0.2
 	WavyTextOffset					dd 2.0
-
 	BgPulseTimescale				dd 0.75
 	BgPulseOffsetBase				dd 26	; 16+16/2
 	BgPulseOffsetB					dd 6.0	; 16/2
@@ -44,12 +47,12 @@ section .data
 	str_errmsg_format				db "[ERROR] (00000000) ",0		; will be filled in and expanded by fn
 	strlen_errmsg_format			equ $-str_errmsg_format-1
 	strloc_errmsg_format_err		equ 9							; position of the start of the error code
-	str_get_hinst					db "Getting HINSTANCE",10,0
-	str_init_wndclass				db "Initializing Window Class",10,0
-	str_reg_wndclass				db "Registering Window Class",10,0
-	str_create_window				db "Creating Window",10,0
-	str_show_window					db "Showing Window",10,0
-	str_bbuf_render					db "BackBuffer Render",10,0
+	str_get_hinst					db "Getting HINSTANCE",0
+	str_init_wndclass				db "Initializing Window Class",0
+	str_reg_wndclass				db "Registering Window Class",0
+	str_create_window				db "Creating Window",0
+	str_show_window					db "Showing Window",0
+	str_bbuf_render					db "BackBuffer Render",0
 
 	str_gale						db "GALE WAS HERE!",0
 	str_dom							db "DOM IS A LOSER!",0
@@ -84,7 +87,7 @@ _main:
 
 get_hinstance:
 	push	str_get_hinst
-	call	print
+	call	debug_println
 	push	NULL						; lpModuleName
 	call	_GetModuleHandleA@4
 	mov		[ModuleHandle], eax
@@ -94,11 +97,11 @@ get_hinstance:
 	call	show_error_and_exit
 .success:
 	push	eax							; print HINSTANCE
-	call	print_h32
+	call	debug_print_h32
 
 initialize_window_class:
 	push	str_init_wndclass
-	call	print
+	call	debug_println
 	push	eax
 	push	ebx
 	push	ecx
@@ -118,7 +121,7 @@ initialize_window_class:
 	push	ecx							; hInstance
     call	_LoadImageA@24
 	push	eax							; print LoadImageA(Icon) result
-	call	print_h32
+	call	debug_print_h32
 	mov		dword [WindowClass+WNDCLASSEXA.hIcon], eax
 	mov		dword [WindowClass+WNDCLASSEXA.hIconSm], eax
 	push	LR_DEFAULTSIZE				; fuLoad
@@ -129,7 +132,7 @@ initialize_window_class:
 	push	ecx							; hInstance
     call	_LoadImageA@24
 	push	eax							; print LoadImageA(Cursor) result
-	call	print_h32
+	call	debug_print_h32
 	mov		dword [WindowClass+WNDCLASSEXA.hCursor], eax
 	mov		dword [WindowClass+WNDCLASSEXA.hbrBackground], COLOR_WINDOWFRAME
 	mov		dword [WindowClass+WNDCLASSEXA.lpszMenuName], 0
@@ -140,11 +143,11 @@ initialize_window_class:
 
 register_wndclass:
 	push	str_reg_wndclass
-	call	print
+	call	debug_println
 	push	WindowClass
 	call	_RegisterClassExA@4
 	push	eax	
-	call	print_h32
+	call	debug_print_h32
 	cmp		eax, 0
 	jnz		.success
     push	str_RegisterClassExA
@@ -155,7 +158,7 @@ register_wndclass:
 
 create_window:
 	push	str_create_window
-	call	print
+	call	debug_println
 	push	ebx
 	push	ecx
 	sub		esp, RECT_size
@@ -191,7 +194,7 @@ create_window:
 	push 	WS_EX_CLIENTEDGE
 	call	_CreateWindowExA@48
 	push	eax							; print HWND
-	call	print_h32
+	call	debug_print_h32
 	cmp		eax, 0
 	jnz		.success
     push	str_CreateWindowExA
@@ -354,11 +357,29 @@ wndproc:
 	ret		16
 
 ; conditionally println based on wndproc toggle
-; fn wndproc_print(str: [*:0]const u8) callconv(.stdcall) void
+; fn wndproc_println(str: [*:0]const u8) callconv(.stdcall) void
 wndproc_println:
-	%if	bPrintInWndProc
+	%if	bPrintDebug & bPrintInWndProc
 	push	[esp+4]
 	call	println
+	%endif
+	ret		4
+
+; conditionally println based on debug toggle
+; fn debug_println(str: [*:0]const u8) callconv(.stdcall) void
+debug_println:
+	%if	bPrintDebug
+	push	[esp+4]
+	call	println
+	%endif
+	ret		4
+
+; conditionally println based on debug toggle
+; fn debug_println(str: [*:0]const u8) callconv(.stdcall) void
+debug_print_h32:
+	%if	bPrintDebug
+	push	[esp+4]
+	call	print_h32
 	%endif
 	ret		4
 

@@ -2,39 +2,35 @@
 %define _VBUF_TEXT_S_
 
 
-; FIXME: go back and convert all the draw functions to actually use i16 as input
-;  for x/y/w/h (or convert them all to i32), to make everything consistent
-
-
 %include "vbuf.s"
 %include "vbuf_sprite.s"
 %include "math.s"
 
 
 struc ScreenFont
-	.GlyphW				resb 1
-	.GlyphH				resb 1
-	.AdvanceX			resb 1
-	.AdvanceY			resb 1
-	.pGlyphs			resd 1
+	.GlyphW					resb 1
+	.GlyphH					resb 1
+	.AdvanceX				resb 1
+	.AdvanceY				resb 1
+	.pGlyphs				resd 1
 endstruc
 
 struc ScreenGlyphAdvance
 	; lower bytes not used, so you can AND against whole structure
-	VB_SGA_RESET_X		equ 0x00010000
-	VB_SGA_RESET_Y		equ 0x00020000
-	VB_SGA_NULL			equ 0x80000000
+	VB_SGA_RESET_X			equ 0x00010000
+	VB_SGA_RESET_Y			equ 0x00020000
+	VB_SGA_NULL				equ 0x80000000
 
-	.X					resb 1	; al
-	.Y					resb 1	; ah
-	.Flags				resw 1
+	.X						resb 1	; al
+	.Y						resb 1	; ah
+	.Flags					resw 1
 endstruc
 
 
 section .data
 
-	GlyphsTitle			incbin "ftitle.bin"
-	GlyphsBody			incbin "fbody.bin"
+	GlyphsTitle				incbin "ftitle.bin"
+	GlyphsBody				incbin "fbody.bin"
 
 	FontTitle:
 	istruc ScreenFont

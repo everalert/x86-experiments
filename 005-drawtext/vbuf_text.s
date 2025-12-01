@@ -2,7 +2,11 @@
 %define _VBUF_TEXT_S_
 
 
-; TODO: vbuf_text_get_width and vbuf_text_get_height (or vbuf_text_get_dimensions)
+; FIXME: fix vbuf_measure_text reporing slightly-off width. currently, the width
+;  is based entirely on ScreenFont.AdvanceX (propagated from vbuf_draw_char), so
+;  the last iteration needs to be adjusted to use ScreenFont.GlyphW instead.
+; FIXME: go back and convert all the draw functions to actually use i16 as input
+;  for x/y/w/h (or convert them all to i32), to make everything consistent
 
 
 %include "vbuf.s"

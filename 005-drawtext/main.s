@@ -34,6 +34,10 @@ section .data
 	WavyTextFrequency				dd 0.2
 	WavyTextOffset					dd 2.0
 
+	BgPulseTimescale				dd 0.75
+	BgPulseOffsetBase				dd 26	; 16+16/2
+	BgPulseOffsetB					dd 6.0	; 16/2
+
     str_window_name					db "TestWindow",0
 	str_wndclass_name				db "TestWndClass",0
 	str_error						db "Error!",0
@@ -405,6 +409,19 @@ backbuffer_draw:
 	push	edx
 	sub		esp, 8
 	mov		edx, esp
+	; clear
+	push	[BgPulseTimescale]				; frequency
+	push	[BgPulseOffsetB]				; amplitude
+	push	[AppTimerCircle]				; phase
+	push	[f32_0]							; t
+	call	sinwave
+	push	eax
+	call	f32toi
+	add		eax, [BgPulseOffsetBase]
+	push	eax
+	call	vbuf_flood			
+	; test drawing
+	;call	vbuf_test_draw_text
 	; get midpoint
 	mov		eax, [BackBuffer+ScreenBuffer.Width]
 	shr		eax, 1
@@ -412,15 +429,6 @@ backbuffer_draw:
 	mov		eax, [BackBuffer+ScreenBuffer.Height]
 	shr		eax, 1
 	mov		[esp+4], eax
-	; clear
-	mov		ecx, dword [FrameCount]
-	and		ecx, dword 0x00003F				; 0xRRGGBB
-	shr		ecx, 2
-	add		ecx, dword 0xF
-	push	ecx
-	call	vbuf_flood			
-	; test drawing
-	;call	vbuf_test_draw_text
 	; funny xd title
 	push	FontTitle
 	push	str_gale

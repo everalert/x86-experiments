@@ -36,12 +36,36 @@ sinwave:
 	fsin
 	fmul	dword [ebp+16]			; amplitude
 	fxch
-	fstp	dword [ebp+8]
+	fstp	st0						; pop and discard from fpu stack
 	fstp	dword [ebp+8]
 	mov		eax, [ebp+8]
 	; epilogue
 	pop		ebp
 	ret		16
+
+; simpler sinwave generation with non-pessimized logic for use cases that don't 
+;  need phase/frequency
+; @a		amplitude
+; @ret		offset (sin)
+; stdcall
+; fn sinwave_simple(t: f32, a: f32) f32
+sinwave_simple:
+	push	ebp
+	mov		ebp, esp
+	; wave
+	fld		dword [ebp+8]			; t
+	fld		dword [f32_tau]
+	fxch
+	fprem1
+	fsin
+	fmul	dword [ebp+12]			; amplitude
+	fxch
+	fstp	st0
+	fstp	dword [ebp+8]
+	mov		eax, [ebp+8]
+	; epilogue
+	pop		ebp
+	ret		8
 
 ; convenience functions for dealing with the fact that fpu only uses memory refs
 
